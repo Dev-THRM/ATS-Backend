@@ -83,6 +83,18 @@ export class CandidateNotificationWorker extends WorkerHost {
       `Processing status update notification for candidate ${candidateName} (Application: ${applicationId}) -> Stage: ${stageName}`,
     );
 
+    if (applicationId) {
+      const application = await this.prisma.application.findUnique({
+        where: { id: applicationId },
+      });
+      if (!application) {
+        this.logger.warn(
+          `Application ${applicationId} no longer exists in database. Skipping status notification.`,
+        );
+        return { skipped: true, reason: 'APPLICATION_NOT_FOUND' };
+      }
+    }
+
     if (!candidatePhone) {
       this.logger.warn(
         `Candidate ${candidateName} has no phone number attached. Skipping WhatsApp dispatch.`,
@@ -134,7 +146,7 @@ export class CandidateNotificationWorker extends WorkerHost {
           sentAt: sendResult.timestamp,
         });
 
-        await this.prisma.application.update({
+        await this.prisma.application.updateMany({
           where: { id: applicationId },
           data: {
             metadata: {
@@ -183,6 +195,25 @@ export class CandidateNotificationWorker extends WorkerHost {
       `Processing interview ${type} WhatsApp notification for candidate ${candidateName} (Interview: ${interviewId})`,
     );
 
+    // Guard: If interview ID is provided, verify it still exists in DB and is not cancelled
+    if (interviewId) {
+      const interview = await this.prisma.interview.findUnique({
+        where: { id: interviewId },
+      });
+      if (!interview) {
+        this.logger.warn(
+          `Interview ${interviewId} no longer exists in database. Skipping ${type} notification.`,
+        );
+        return { skipped: true, reason: 'INTERVIEW_NOT_FOUND' };
+      }
+      if (interview.status === 'CANCELLED') {
+        this.logger.warn(
+          `Interview ${interviewId} is CANCELLED. Skipping ${type} notification.`,
+        );
+        return { skipped: true, reason: 'INTERVIEW_CANCELLED' };
+      }
+    }
+
     if (!candidatePhone) {
       this.logger.warn(
         `Candidate ${candidateName} has no phone number. Skipping interview ${type} WhatsApp.`,
@@ -221,7 +252,7 @@ export class CandidateNotificationWorker extends WorkerHost {
     // Mark reminder as sent in interview record if this is a reminder
     if (type === 'REMINDER' && interviewId) {
       try {
-        await this.prisma.interview.update({
+        await this.prisma.interview.updateMany({
           where: { id: interviewId },
           data: {
             reminderSent: true,
@@ -262,7 +293,7 @@ export class CandidateNotificationWorker extends WorkerHost {
             sentAt: sendResult.timestamp,
           });
 
-          await this.prisma.application.update({
+          await this.prisma.application.updateMany({
             where: { id: applicationId },
             data: {
               metadata: {

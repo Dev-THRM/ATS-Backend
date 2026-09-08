@@ -20,6 +20,18 @@ describe('CandidateNotificationWorker', () => {
         update: vi.fn().mockResolvedValue({
           id: 'app-1',
         }),
+        updateMany: vi.fn().mockResolvedValue({
+          count: 1,
+        }),
+      },
+      interview: {
+        findUnique: vi.fn().mockResolvedValue({
+          id: 'int-1',
+          status: 'SCHEDULED',
+        }),
+        updateMany: vi.fn().mockResolvedValue({
+          count: 1,
+        }),
       },
     };
 
@@ -55,7 +67,7 @@ describe('CandidateNotificationWorker', () => {
     expect(prismaMock.application.findUnique).toHaveBeenCalledWith({
       where: { id: 'app-1' },
     });
-    expect(prismaMock.application.update).toHaveBeenCalledWith(
+    expect(prismaMock.application.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: { id: 'app-1' },
         data: expect.objectContaining({
