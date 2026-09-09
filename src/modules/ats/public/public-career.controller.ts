@@ -81,4 +81,18 @@ export class PublicCareerController {
   ) {
     return this.publicCareerService.applyPublic(orgSlug, jobId, dto, file);
   }
+
+  /**
+   * Public Webhook/API endpoint for headless candidate ingestion from third-party boards
+   * (e.g. LinkedIn Easy Apply, Naukri, Glassdoor, Unstop, Indeed API).
+   */
+  @Post(':orgSlug/:jobId/ingest')
+  @HttpCode(HttpStatus.CREATED)
+  async ingestCandidate(
+    @Param('orgSlug') orgSlug: string,
+    @Param('jobId') jobId: string,
+    @Body() dto: PublicApplyJobDto & { resumeUrl?: string },
+  ) {
+    return this.publicCareerService.ingestCandidate(orgSlug, jobId, dto);
+  }
 }
