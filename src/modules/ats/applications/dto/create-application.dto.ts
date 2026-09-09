@@ -29,6 +29,22 @@ export class CreateApplicationDto {
   @IsOptional()
   coverLetter?: string;
 
+  @IsString()
+  @IsOptional()
+  source?: string;
+
+  @IsString()
+  @IsOptional()
+  utmSource?: string;
+
+  @IsString()
+  @IsOptional()
+  utmMedium?: string;
+
+  @IsString()
+  @IsOptional()
+  utmCampaign?: string;
+
   @IsOptional()
   metadata?: Record<string, any>;
 }
