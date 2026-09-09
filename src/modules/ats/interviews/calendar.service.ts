@@ -23,16 +23,18 @@ export class CalendarService {
     let code3 = '';
 
     if (seed) {
-      // Deterministic hash based on seed/interviewId
       let hash = 0;
       for (let i = 0; i < seed.length; i++) {
         hash = (hash << 5) - hash + seed.charCodeAt(i);
         hash |= 0;
       }
-      const absHash = Math.abs(hash).toString(36).padEnd(10, 'x');
-      code1 = absHash.substring(0, 3);
-      code2 = absHash.substring(3, 7);
-      code3 = absHash.substring(7, 10);
+      const n = Math.abs(hash);
+      const getLetter = (index: number) => {
+        return chars[(n + index * 17 + index * index * 7) % chars.length];
+      };
+      for (let i = 0; i < 3; i++) code1 += getLetter(i);
+      for (let i = 3; i < 7; i++) code2 += getLetter(i);
+      for (let i = 7; i < 10; i++) code3 += getLetter(i);
     } else {
       for (let i = 0; i < 3; i++) code1 += chars.charAt(Math.floor(Math.random() * chars.length));
       for (let i = 0; i < 4; i++) code2 += chars.charAt(Math.floor(Math.random() * chars.length));
