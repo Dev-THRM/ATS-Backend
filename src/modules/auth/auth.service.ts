@@ -5,6 +5,7 @@ import {
   UnauthorizedException,
   NotFoundException,
   BadRequestException,
+  ForbiddenException,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
@@ -14,6 +15,7 @@ import { PrismaService } from '../shared/prisma/prisma.service.js';
 import { RegisterDto } from './dto/register.dto.js';
 import { LoginDto } from './dto/login.dto.js';
 import { RefreshTokenDto } from './dto/refresh-token.dto.js';
+import { UpdateOrganizationDto } from './dto/update-organization.dto.js';
 import {
   AuthResponse,
   AuthTokens,
@@ -23,6 +25,18 @@ import {
   JwtPayload,
   JwtRefreshPayload,
 } from './interfaces/jwt-payload.interface.js';
+
+export const RESERVED_SYSTEM_SLUGS = new Set([
+  'admin', 'administrator', 'api', 'app', 'auth', 'billing', 'careers',
+  'dashboard', 'docs', 'help', 'login', 'logout', 'portal', 'register',
+  'root', 'settings', 'signup', 'status', 'superadmin', 'support', 'system',
+  'webhook', 'webhooks', 'jobs', 'ats', 'hrms', 'crm',
+]);
+
+export const PUBLIC_EMAIL_DOMAINS = new Set([
+  'gmail.com', 'yahoo.com', 'hotmail.com', 'outlook.com', 'icloud.com',
+  'protonmail.com', 'mail.com', 'zoho.com', 'aol.com', 'gmx.com', 'yandex.com',
+]);
 
 @Injectable()
 export class AuthService {
@@ -37,11 +51,20 @@ export class AuthService {
    */
   async checkSlugAvailability(
     slug: string,
-  ): Promise<{ slug: string; available: boolean }> {
+  ): Promise<{ slug: string; available: boolean; reason?: string }> {
     if (!slug || !slug.trim()) {
       throw new BadRequestException('slug query parameter is required');
     }
     const cleanSlug = slug.toLowerCase().trim();
+
+    if (RESERVED_SYSTEM_SLUGS.has(cleanSlug)) {
+      return {
+        slug: cleanSlug,
+        available: false,
+        reason: 'This slug is reserved by the platform',
+      };
+    }
+
     const existingOrg = await this.prisma.organization.findUnique({
       where: { slug: cleanSlug },
       select: { id: true },
@@ -49,6 +72,7 @@ export class AuthService {
     return {
       slug: cleanSlug,
       available: !existingOrg,
+      reason: existingOrg ? 'Slug is already registered' : undefined,
     };
   }
 
@@ -62,6 +86,13 @@ export class AuthService {
     const slug = dto.organizationSlug.toLowerCase().trim();
     const email = dto.email.toLowerCase().trim();
 
+    // Prevent registering reserved system slugs
+    if (RESERVED_SYSTEM_SLUGS.has(slug)) {
+      throw new BadRequestException(
+        `The slug '${slug}' is reserved by the platform. Please choose a unique company name.`,
+      );
+    }
+
     // Check if organization slug is already taken
     const existingOrg = await this.prisma.organization.findUnique({
       where: { slug },
@@ -70,6 +101,20 @@ export class AuthService {
       throw new ConflictException(
         `Organization with slug '${slug}' already exists`,
       );
+    }
+
+    // Enterprise domain verification
+    const emailDomain = email.split('@')[1]?.toLowerCase() || '';
+    const isPublicEmail = PUBLIC_EMAIL_DOMAINS.has(emailDomain);
+    let isVerified = false;
+    let verifiedDomain: string | null = null;
+
+    if (!isPublicEmail && emailDomain) {
+      const domainBase = emailDomain.split('.')[0];
+      if (slug === domainBase || slug.includes(domainBase) || domainBase.includes(slug)) {
+        isVerified = true;
+        verifiedDomain = emailDomain;
+      }
     }
 
     // Determine initial plans based on query param if passed
@@ -92,6 +137,11 @@ export class AuthService {
         data: {
           name: dto.organizationName.trim(),
           slug,
+          isVerified,
+          verifiedDomain,
+          sourcingChannels: dto.sourcingChannels && dto.sourcingChannels.length > 0
+            ? dto.sourcingChannels
+            : ['CAREER_PORTAL', 'LINKEDIN', 'NAUKRI', 'GLASSDOOR', 'UNSTOP', 'INDEED'],
         },
       });
 
@@ -244,9 +294,16 @@ export class AuthService {
     }
 
     if (users.length > 1 && !dto.organizationSlug) {
-      throw new BadRequestException(
-        'Multiple organizations found for this email. Please specify your organizationSlug via body or query parameter ?organizationSlug=...',
-      );
+      const organizations = users.map((u) => ({
+        id: u.organization.id,
+        name: u.organization.name,
+        slug: u.organization.slug,
+      }));
+      throw new BadRequestException({
+        message: 'Multiple workspaces found for this email. Please select your workspace.',
+        organizations,
+        requiresOrganizationSlug: true,
+      });
     }
 
     const user = users[0];
@@ -483,8 +540,107 @@ export class AuthService {
         id: organization.id,
         name: organization.name,
         slug: organization.slug,
+        logoUrl: organization.logoUrl,
+        website: organization.website,
+        sourcingChannels: organization.sourcingChannels,
         activePlans,
       },
     };
+  }
+
+  /**
+   * Get organization details for the authenticated user's organization.
+   */
+  async getOrganization(userId: string): Promise<any> {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { organizationId: true },
+    });
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+
+    const org = await this.prisma.organization.findUnique({
+      where: { id: user.organizationId },
+      include: {
+        _count: {
+          select: {
+            users: true,
+            jobs: true,
+            candidates: true,
+          },
+        },
+      },
+    });
+
+    if (!org) {
+      throw new NotFoundException('Organization not found');
+    }
+
+    return org;
+  }
+
+  /**
+   * Update organization details (Super Admin / Admin only).
+   */
+  async updateOrganization(
+    userId: string,
+    dto: UpdateOrganizationDto,
+  ): Promise<any> {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      include: { role: true },
+    });
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+
+    // Check if user has admin/super-admin privileges
+    const allowedRoles: string[] = [SystemRoleType.SUPER_ADMIN, SystemRoleType.ADMIN];
+    if (!allowedRoles.includes(user.role.type)) {
+      throw new ForbiddenException(
+        'Only Super Admin or Admin can edit organization settings.',
+      );
+    }
+
+    // If changing slug, verify availability
+    if (dto.slug) {
+      const cleanSlug = dto.slug.toLowerCase().trim();
+      if (RESERVED_SYSTEM_SLUGS.has(cleanSlug)) {
+        throw new BadRequestException('This slug is reserved by the platform');
+      }
+
+      const existingOrg = await this.prisma.organization.findUnique({
+        where: { slug: cleanSlug },
+      });
+
+      if (existingOrg && existingOrg.id !== user.organizationId) {
+        throw new ConflictException(
+          `Workspace slug '${cleanSlug}' is already taken by another organization.`,
+        );
+      }
+    }
+
+    const updatedOrg = await this.prisma.organization.update({
+      where: { id: user.organizationId },
+      data: {
+        ...(dto.name ? { name: dto.name.trim() } : {}),
+        ...(dto.slug ? { slug: dto.slug.toLowerCase().trim() } : {}),
+        ...(dto.website !== undefined ? { website: dto.website ? dto.website.trim() : null } : {}),
+        ...(dto.logoUrl !== undefined ? { logoUrl: dto.logoUrl ? dto.logoUrl.trim() : null } : {}),
+        ...(dto.sourcingChannels ? { sourcingChannels: dto.sourcingChannels } : {}),
+      },
+      include: {
+        _count: {
+          select: {
+            users: true,
+            jobs: true,
+            candidates: true,
+          },
+        },
+      },
+    });
+
+    return updatedOrg;
   }
 }
