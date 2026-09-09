@@ -270,4 +270,72 @@ export class JobsService {
       id: jobId,
     };
   }
+
+  /**
+   * Generates channel-specific tracking links and share metadata for job posting.
+   */
+  async getShareLinks(organizationId: string, jobId: string) {
+    const job = await this.findOne(organizationId, jobId);
+    const org = await this.prisma.organization.findUnique({
+      where: { id: organizationId },
+      select: { name: true, slug: true, sourcingChannels: true },
+    });
+
+    if (!org) {
+      throw new NotFoundException('Organization not found');
+    }
+
+    const channels = org.sourcingChannels?.length
+      ? org.sourcingChannels
+      : ['CAREER_PORTAL', 'LINKEDIN', 'NAUKRI', 'GLASSDOOR', 'UNSTOP', 'INDEED', 'WELLFOUND', 'REFERRAL'];
+
+    const channelMetaMap: Record<string, { label: string; color: string }> = {
+      CAREER_PORTAL: { label: 'Company Career Site', color: '#6366F1' },
+      LINKEDIN: { label: 'LinkedIn Job Post / Ad', color: '#0A66C2' },
+      NAUKRI: { label: 'Naukri.com Recruitment', color: '#1B69D0' },
+      GLASSDOOR: { label: 'Glassdoor Jobs', color: '#0CAA41' },
+      UNSTOP: { label: 'Unstop Campus / Lateral', color: '#7C3AED' },
+      INDEED: { label: 'Indeed Apply Feed', color: '#2164F3' },
+      WELLFOUND: { label: 'Wellfound (AngelList)', color: '#FF4D4D' },
+      INTERNSHALA: { label: 'Internshala Hire', color: '#1295D8' },
+      REFERRAL: { label: 'Employee Referral Link', color: '#F59E0B' },
+      DIRECT_SOURCING: { label: 'Direct Sourcing Outreach', color: '#10B981' },
+    };
+
+    const links = channels.map((channel) => {
+      const meta = channelMetaMap[channel] || {
+        label: channel.replace(/_/g, ' '),
+        color: '#64748B',
+      };
+      const queryParams = new URLSearchParams({
+        source: channel,
+        utm_source: channel.toLowerCase(),
+        utm_medium: 'job_board',
+        utm_campaign: job.title.toLowerCase().replace(/[^a-z0-9]+/g, '_'),
+      });
+
+      return {
+        channel,
+        label: meta.label,
+        color: meta.color,
+        applyUrl: `/careers/${org.slug}/apply/${job.id}?${queryParams.toString()}`,
+        utmParams: {
+          source: channel,
+          utm_source: channel.toLowerCase(),
+          utm_medium: 'job_board',
+          utm_campaign: job.title.toLowerCase().replace(/[^a-z0-9]+/g, '_'),
+        },
+      };
+    });
+
+    return {
+      jobId: job.id,
+      jobTitle: job.title,
+      organizationName: org.name,
+      organizationSlug: org.slug,
+      sourcingChannels: channels,
+      links,
+      socialShareText: `We're hiring a ${job.title} at ${org.name}! Apply now: `,
+    };
+  }
 }
