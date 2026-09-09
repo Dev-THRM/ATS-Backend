@@ -664,8 +664,13 @@ export class AuthService {
       throw new NotFoundException('User or organization not found');
     }
 
-    const roleName = user.role?.name;
-    if (roleName !== 'SUPER_ADMIN' && roleName !== 'ADMIN') {
+    const allowedRoles: string[] = [SystemRoleType.SUPER_ADMIN, SystemRoleType.ADMIN];
+    if (
+      !user.role ||
+      (!allowedRoles.includes(user.role.type) &&
+        user.role.name !== 'Super Admin' &&
+        user.role.name !== 'Admin')
+    ) {
       throw new ForbiddenException(
         'Only Super Admins or Admins can upload organization logo',
       );
