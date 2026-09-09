@@ -16,6 +16,9 @@ export interface UserSummary {
     id: string;
     name: string;
     slug: string;
+    logoUrl?: string | null;
+    website?: string | null;
+    sourcingChannels?: string[];
     activePlans: AppPlan[];
   };
 }
