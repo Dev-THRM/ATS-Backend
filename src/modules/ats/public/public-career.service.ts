@@ -89,6 +89,8 @@ export class PublicCareerService {
         slug: true,
         logoUrl: true,
         website: true,
+        isVerified: true,
+        verifiedDomain: true,
       },
     });
 
@@ -139,6 +141,8 @@ export class PublicCareerService {
         slug: true,
         logoUrl: true,
         website: true,
+        isVerified: true,
+        verifiedDomain: true,
       },
     });
 
@@ -243,7 +247,9 @@ export class PublicCareerService {
       resumeUrl = uploadResult.url;
     }
 
-    // 1. Create or update candidate record with source = 'CAREER_PORTAL'
+    const effectiveSource = (dto.source || dto.utmSource || 'CAREER_PORTAL').toUpperCase().trim();
+
+    // 1. Create or update candidate record with dynamic source attribution
     const candidate = await this.candidatesService.findOrCreate(org.id, {
       firstName: dto.firstName,
       lastName: dto.lastName,
@@ -256,7 +262,7 @@ export class PublicCareerService {
       portfolioUrl: dto.portfolioUrl,
       githubUrl: dto.githubUrl,
       skills: dto.skills || [],
-      source: 'CAREER_PORTAL',
+      source: effectiveSource,
       resumeUrl: resumeUrl || undefined,
     });
 
@@ -265,15 +271,18 @@ export class PublicCareerService {
       jobId: job.id,
       candidateId: candidate.id,
       coverLetter: dto.coverLetter,
-      metadata: resumeKey
-        ? {
-            resumeKey,
-            resumeUrl,
-            appliedVia: 'PUBLIC_CAREER_PORTAL',
-          }
-        : {
-            appliedVia: 'PUBLIC_CAREER_PORTAL',
-          },
+      source: effectiveSource,
+      utmSource: dto.utmSource,
+      utmMedium: dto.utmMedium,
+      utmCampaign: dto.utmCampaign,
+      metadata: {
+        ...(resumeKey ? { resumeKey, resumeUrl } : {}),
+        appliedVia: effectiveSource,
+        sourceChannel: effectiveSource,
+        utmSource: dto.utmSource,
+        utmMedium: dto.utmMedium,
+        utmCampaign: dto.utmCampaign,
+      },
     });
 
     return {
@@ -281,6 +290,81 @@ export class PublicCareerService {
       applicationId: application.id,
       candidateId: candidate.id,
       jobTitle: job.title,
+      source: effectiveSource,
+    };
+  }
+
+  /**
+   * Headless JSON candidate ingestion endpoint for third-party job boards & webhook integrations
+   * (e.g. LinkedIn Easy Apply webhook, Naukri applicant integration, Unstop API).
+   */
+  async ingestCandidate(
+    orgSlug: string,
+    jobId: string,
+    dto: PublicApplyJobDto & { resumeUrl?: string },
+  ) {
+    const org = await this.prisma.organization.findUnique({
+      where: { slug: orgSlug },
+    });
+
+    if (!org) {
+      throw new NotFoundException(`Organization with slug '${orgSlug}' not found`);
+    }
+
+    const job = await this.prisma.job.findFirst({
+      where: {
+        id: jobId,
+        organizationId: org.id,
+        status: JobStatus.OPEN,
+      },
+    });
+
+    if (!job) {
+      throw new BadRequestException('Cannot ingest: job is not currently open');
+    }
+
+    const effectiveSource = (dto.source || dto.utmSource || 'JOB_BOARD_WEBHOOK').toUpperCase().trim();
+
+    // 1. Find or create candidate record
+    const candidate = await this.candidatesService.findOrCreate(org.id, {
+      firstName: dto.firstName,
+      lastName: dto.lastName,
+      email: dto.email,
+      phone: dto.phone,
+      currentCompany: dto.currentCompany,
+      currentTitle: dto.currentTitle,
+      location: dto.location,
+      linkedinUrl: dto.linkedinUrl,
+      portfolioUrl: dto.portfolioUrl,
+      githubUrl: dto.githubUrl,
+      skills: dto.skills || [],
+      source: effectiveSource,
+      resumeUrl: dto.resumeUrl,
+    });
+
+    // 2. Submit application
+    const application = await this.applicationsService.create(org.id, {
+      jobId: job.id,
+      candidateId: candidate.id,
+      coverLetter: dto.coverLetter,
+      source: effectiveSource,
+      utmSource: dto.utmSource,
+      utmMedium: dto.utmMedium,
+      utmCampaign: dto.utmCampaign,
+      metadata: {
+        ...(dto.resumeUrl ? { resumeUrl: dto.resumeUrl } : {}),
+        appliedVia: effectiveSource,
+        sourceChannel: effectiveSource,
+        ingestedVia: 'WEBHOOK_API',
+      },
+    });
+
+    return {
+      message: 'Candidate ingested successfully',
+      applicationId: application.id,
+      candidateId: candidate.id,
+      jobTitle: job.title,
+      source: effectiveSource,
     };
   }
 }
