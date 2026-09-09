@@ -206,9 +206,9 @@ export class CandidateNotificationWorker extends WorkerHost {
         );
         return { skipped: true, reason: 'INTERVIEW_NOT_FOUND' };
       }
-      if (interview.status === 'CANCELLED') {
+      if (interview.status === 'CANCELED') {
         this.logger.warn(
-          `Interview ${interviewId} is CANCELLED. Skipping ${type} notification.`,
+          `Interview ${interviewId} is CANCELED. Skipping ${type} notification.`,
         );
         return { skipped: true, reason: 'INTERVIEW_CANCELLED' };
       }
