@@ -39,4 +39,7 @@ export class RegisterDto {
   @IsString()
   @IsOptional()
   phone?: string;
+
+  @IsOptional()
+  sourcingChannels?: string[];
 }
