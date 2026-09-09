@@ -13,6 +13,7 @@ import { PrismaService } from '../../shared/prisma/prisma.service.js';
 import { CandidatesService } from '../candidates/candidates.service.js';
 import { PipelineStagesService } from '../jobs/pipeline-stages.service.js';
 import { StageTransitionService } from '../../shared/pipelines/stage-transition.service.js';
+import { CalendarService } from '../interviews/calendar.service.js';
 import {
   RESUME_QUEUE,
   NOTIFICATION_QUEUE,
@@ -30,6 +31,7 @@ export class ApplicationsService {
     private readonly pipelineStagesService: PipelineStagesService,
     @Inject(StageTransitionService)
     private readonly stageTransitionService: StageTransitionService,
+    @Optional() @Inject(CalendarService) private readonly calendarService?: CalendarService,
     @Optional() @InjectQueue(RESUME_QUEUE) private readonly resumeQueue?: Queue,
     @Optional()
     @InjectQueue(NOTIFICATION_QUEUE)
@@ -130,6 +132,8 @@ export class ApplicationsService {
       }
     }
 
+    const effectiveSource = (dto.source || dto.utmSource || candidateRecord?.source || 'CAREER_PORTAL').toUpperCase().trim();
+
     const application = await this.prisma.application.create({
       data: {
         organizationId,
@@ -137,6 +141,10 @@ export class ApplicationsService {
         candidateId,
         currentStageId,
         coverLetter: dto.coverLetter,
+        source: effectiveSource,
+        utmSource: dto.utmSource ?? undefined,
+        utmMedium: dto.utmMedium ?? undefined,
+        utmCampaign: dto.utmCampaign ?? undefined,
         metadata: dto.metadata ?? undefined,
         status: ApplicationStatus.ACTIVE,
       },
@@ -258,6 +266,11 @@ export class ApplicationsService {
             },
           },
           currentStage: true,
+          interviews: {
+            where: { status: 'SCHEDULED' },
+            orderBy: { scheduledAt: 'asc' },
+            take: 1,
+          },
         },
       }),
     ]);
@@ -292,6 +305,11 @@ export class ApplicationsService {
           },
         },
         currentStage: true,
+        interviews: {
+          where: { status: 'SCHEDULED' },
+          orderBy: { scheduledAt: 'asc' },
+          take: 1,
+        },
       },
     });
 
@@ -356,6 +374,67 @@ export class ApplicationsService {
       status = ApplicationStatus.ACTIVE;
     }
 
+    // Auto-create persistent reserved meeting room if transitioning to an interview stage
+    const isInterviewStage =
+      stageNameLower.includes('interview') ||
+      stageNameLower.includes('technical') ||
+      stageNameLower.includes('managerial') ||
+      stageNameLower.includes('screening') ||
+      stageNameLower.includes('hr');
+
+    if (isInterviewStage) {
+      try {
+        const existingInterview = await this.prisma.interview.findFirst({
+          where: {
+            applicationId,
+            organizationId,
+            status: 'SCHEDULED',
+          },
+        });
+
+        if (!existingInterview) {
+          const cal = this.calendarService || new CalendarService();
+          const scheduledDate = new Date(Date.now() + 24 * 3600 * 1000);
+          const meetingLink = cal.generateGoogleMeetLink(applicationId);
+          const googleCalendarHtmlLink = cal.generateGoogleCalendarWebLink({
+            title: `${targetStage.name}: ${application.candidate.firstName} ${application.candidate.lastName} - ${application.job.title}`,
+            description: `Interview stage for ${application.job.title}.\nCandidate: ${application.candidate.firstName} ${application.candidate.lastName} (${application.candidate.email})`,
+            start: scheduledDate,
+            durationMinutes: 45,
+            meetingLink,
+          });
+
+          await this.prisma.interview.create({
+            data: {
+              organizationId,
+              applicationId,
+              candidateId: application.candidateId,
+              jobId: application.jobId,
+              interviewerId: userId || null,
+              title: `${targetStage.name}: ${application.candidate.firstName} - ${application.job.title}`,
+              type: stageNameLower.includes('system')
+                ? 'SYSTEM_DESIGN'
+                : stageNameLower.includes('manager')
+                ? 'MANAGERIAL'
+                : stageNameLower.includes('hr')
+                ? 'HR_FINAL'
+                : stageNameLower.includes('screen')
+                ? 'SCREENING'
+                : 'TECHNICAL',
+              status: 'SCHEDULED',
+              scheduledAt: scheduledDate,
+              durationMinutes: 45,
+              timezone: 'UTC',
+              meetingLink,
+              googleCalendarHtmlLink,
+            },
+          });
+        }
+      } catch (e) {
+        // Safe fallback - do not block stage transition if interview creation encounters duplicate
+      }
+    }
+
     const updated = await this.prisma.application.update({
       where: { id: applicationId },
       data: {
@@ -374,6 +453,11 @@ export class ApplicationsService {
           },
         },
         currentStage: true,
+        interviews: {
+          where: { status: 'SCHEDULED' },
+          orderBy: { scheduledAt: 'asc' },
+          take: 1,
+        },
       },
     });
 
