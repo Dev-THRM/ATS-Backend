@@ -52,6 +52,22 @@ export class PublicApplyJobDto {
   @IsOptional()
   coverLetter?: string;
 
+  @IsString()
+  @IsOptional()
+  source?: string;
+
+  @IsString()
+  @IsOptional()
+  utmSource?: string;
+
+  @IsString()
+  @IsOptional()
+  utmMedium?: string;
+
+  @IsString()
+  @IsOptional()
+  utmCampaign?: string;
+
   @IsOptional()
   @Transform(({ value }) => {
     if (Array.isArray(value)) return value;
