@@ -2,6 +2,7 @@ import {
   Controller,
   Post,
   Get,
+  Patch,
   Body,
   Query,
   HttpCode,
@@ -13,6 +14,7 @@ import { AuthService } from './auth.service.js';
 import { RegisterDto } from './dto/register.dto.js';
 import { LoginDto } from './dto/login.dto.js';
 import { RefreshTokenDto } from './dto/refresh-token.dto.js';
+import { UpdateOrganizationDto } from './dto/update-organization.dto.js';
 import { Public } from '../../common/decorators/public.decorator.js';
 import { CurrentUser } from '../../common/decorators/current-user.decorator.js';
 import { JwtAuthGuard } from './guards/jwt-auth.guard.js';
@@ -120,5 +122,30 @@ export class AuthController {
     return this.authService.getMe(userId, {
       includePermissions: shouldIncludePermissions,
     });
+  }
+
+  /**
+   * Get current user's organization profile and stats
+   * Example: GET /api/v1/auth/organization
+   */
+  @Get('organization')
+  @HttpCode(HttpStatus.OK)
+  async getOrganization(
+    @CurrentUser('userId') userId: string,
+  ): Promise<any> {
+    return this.authService.getOrganization(userId);
+  }
+
+  /**
+   * Update organization details (Super Admin / Admin only)
+   * Example: PATCH /api/v1/auth/organization
+   */
+  @Patch('organization')
+  @HttpCode(HttpStatus.OK)
+  async updateOrganization(
+    @CurrentUser('userId') userId: string,
+    @Body() dto: UpdateOrganizationDto,
+  ): Promise<any> {
+    return this.authService.updateOrganization(userId, dto);
   }
 }
