@@ -1,6 +1,7 @@
 import {
   Injectable,
   Inject,
+  Optional,
   ConflictException,
   UnauthorizedException,
   NotFoundException,
@@ -26,6 +27,8 @@ import {
   JwtRefreshPayload,
 } from './interfaces/jwt-payload.interface.js';
 
+import { StorageService } from '../shared/storage/storage.service.js';
+
 export const RESERVED_SYSTEM_SLUGS = new Set([
   'admin', 'administrator', 'api', 'app', 'auth', 'billing', 'careers',
   'dashboard', 'docs', 'help', 'login', 'logout', 'portal', 'register',
@@ -44,6 +47,7 @@ export class AuthService {
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(JwtService) private readonly jwtService: JwtService,
     @Inject(ConfigService) private readonly configService: ConfigService,
+    @Optional() @Inject(StorageService) private readonly storageService?: StorageService,
   ) {}
 
   /**
@@ -642,5 +646,50 @@ export class AuthService {
     });
 
     return updatedOrg;
+  }
+
+  /**
+   * Upload and attach organization logo image file
+   */
+  async uploadOrganizationLogo(
+    userId: string,
+    file: Express.Multer.File,
+  ): Promise<{ logoUrl: string }> {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      include: { role: true },
+    });
+
+    if (!user || !user.organizationId) {
+      throw new NotFoundException('User or organization not found');
+    }
+
+    const roleName = user.role?.name;
+    if (roleName !== 'SUPER_ADMIN' && roleName !== 'ADMIN') {
+      throw new ForbiddenException(
+        'Only Super Admins or Admins can upload organization logo',
+      );
+    }
+
+    if (!file || !file.buffer) {
+      throw new BadRequestException('No logo image file uploaded');
+    }
+
+    const ext = file.originalname ? file.originalname.split('.').pop() : 'png';
+    const key = `logos/${user.organizationId}-${Date.now()}.${ext}`;
+
+    const storage = this.storageService || new StorageService(this.configService);
+    const { url } = await storage.uploadBuffer({
+      key,
+      buffer: file.buffer,
+      contentType: file.mimetype || 'image/png',
+    });
+
+    await this.prisma.organization.update({
+      where: { id: user.organizationId },
+      data: { logoUrl: url },
+    });
+
+    return { logoUrl: url };
   }
 }

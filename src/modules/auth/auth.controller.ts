@@ -8,8 +8,11 @@ import {
   HttpCode,
   HttpStatus,
   UseGuards,
+  UseInterceptors,
+  UploadedFile,
   Inject,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import { AuthService } from './auth.service.js';
 import { RegisterDto } from './dto/register.dto.js';
 import { LoginDto } from './dto/login.dto.js';
@@ -147,5 +150,19 @@ export class AuthController {
     @Body() dto: UpdateOrganizationDto,
   ): Promise<any> {
     return this.authService.updateOrganization(userId, dto);
+  }
+
+  /**
+   * Upload organization logo image (Super Admin / Admin only)
+   * Example: POST /api/v1/auth/organization/logo
+   */
+  @Post('organization/logo')
+  @HttpCode(HttpStatus.OK)
+  @UseInterceptors(FileInterceptor('file'))
+  async uploadOrganizationLogo(
+    @CurrentUser('userId') userId: string,
+    @UploadedFile() file: Express.Multer.File,
+  ): Promise<{ logoUrl: string }> {
+    return this.authService.uploadOrganizationLogo(userId, file);
   }
 }
