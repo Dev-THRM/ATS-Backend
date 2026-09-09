@@ -45,6 +45,9 @@ model Organization {
   slug      String   @unique
   logoUrl   String?
   website   String?
+  isVerified Boolean @default(false)
+  verifiedDomain String?
+  sourcingChannels String[] @default(["CAREER_PORTAL", "LINKEDIN", "NAUKRI", "GLASSDOOR", "UNSTOP", "INDEED"])
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -243,6 +246,10 @@ model Application {
   currentStage    PipelineStage     @relation(fields: [currentStageId], references: [id], onDelete: Restrict)
   status          ApplicationStatus @default(ACTIVE)
   atsScore        Float? // AI ATS score (0-100)
+  source          String?           @default("CAREER_PORTAL") // CAREER_PORTAL, LINKEDIN, NAUKRI, GLASSDOOR, UNSTOP, INDEED, REFERRAL, etc.
+  utmSource       String?
+  utmMedium       String?
+  utmCampaign     String?
   coverLetter     String?
   rejectionReason String?
   metadata        Json?
@@ -257,6 +264,7 @@ model Application {
   @@index([jobId])
   @@index([currentStageId])
   @@index([status])
+  @@index([source])
   @@index([appliedAt])
 }
 
