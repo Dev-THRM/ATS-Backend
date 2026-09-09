@@ -163,4 +163,20 @@ export class JobsController {
   ) {
     return this.pipelineStagesService.reorderStages(id, orgId, dto.stages);
   }
+
+  @Get(':id/share-links')
+  @Roles(
+    SystemRoleType.SUPER_ADMIN,
+    SystemRoleType.ADMIN,
+    SystemRoleType.RECRUITER,
+    SystemRoleType.MANAGER,
+    SystemRoleType.EMPLOYEE,
+  )
+  @Permissions('jobs:read')
+  getShareLinks(
+    @CurrentUser('organizationId') orgId: string,
+    @Param('id') id: string,
+  ) {
+    return this.jobsService.getShareLinks(orgId, id);
+  }
 }
