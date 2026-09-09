@@ -11,7 +11,13 @@ import {
   HttpCode,
   HttpStatus,
   Inject,
+  UseInterceptors,
+  UploadedFiles,
+  Res,
+  Header,
 } from '@nestjs/common';
+import { FilesInterceptor } from '@nestjs/platform-express';
+import type { Response } from 'express';
 import { AppPlan, SystemRoleType } from '@prisma/client';
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard.js';
 import { PlanGuard } from '../../../common/guards/plan.guard.js';
@@ -24,6 +30,7 @@ import { CandidatesService } from './candidates.service.js';
 import { CreateCandidateDto } from './dto/create-candidate.dto.js';
 import { UpdateCandidateDto } from './dto/update-candidate.dto.js';
 import { QueryCandidatesDto } from './dto/query-candidates.dto.js';
+import { BulkImportCsvDto } from './dto/bulk-import.dto.js';
 
 @Controller('ats/candidates')
 @UseGuards(JwtAuthGuard, PlanGuard, RolesGuard)
@@ -33,6 +40,63 @@ export class CandidatesController {
     @Inject(CandidatesService)
     private readonly candidatesService: CandidatesService,
   ) {}
+
+  @Get('import-template.csv')
+  @Header('Content-Type', 'text/csv')
+  @Header('Content-Disposition', 'attachment; filename="candidates_import_template.csv"')
+  @Roles(
+    SystemRoleType.SUPER_ADMIN,
+    SystemRoleType.ADMIN,
+    SystemRoleType.RECRUITER,
+    SystemRoleType.MANAGER,
+  )
+  getTemplateCsv(@Res() res: Response) {
+    const csv = this.candidatesService.getCsvTemplate();
+    return res.send(csv);
+  }
+
+  @Post('bulk-import-csv')
+  @HttpCode(HttpStatus.OK)
+  @Roles(
+    SystemRoleType.SUPER_ADMIN,
+    SystemRoleType.ADMIN,
+    SystemRoleType.RECRUITER,
+    SystemRoleType.MANAGER,
+  )
+  @Permissions('candidates:create')
+  async bulkImportCsv(
+    @CurrentUser('organizationId') orgId: string,
+    @Body() dto: BulkImportCsvDto,
+  ) {
+    return this.candidatesService.bulkImportCsv(orgId, dto);
+  }
+
+  @Post('bulk-import-resumes')
+  @UseInterceptors(
+    FilesInterceptor('resumes', 25, {
+      limits: { fileSize: 15 * 1024 * 1024 }, // 15MB limit per resume
+    }),
+  )
+  @Roles(
+    SystemRoleType.SUPER_ADMIN,
+    SystemRoleType.ADMIN,
+    SystemRoleType.RECRUITER,
+    SystemRoleType.MANAGER,
+  )
+  @Permissions('candidates:create')
+  async bulkImportResumes(
+    @CurrentUser('organizationId') orgId: string,
+    @UploadedFiles() files: Express.Multer.File[],
+    @Body('defaultSource') defaultSource?: string,
+    @Body('jobId') jobId?: string,
+  ) {
+    return this.candidatesService.bulkImportResumes(
+      orgId,
+      files || [],
+      defaultSource || 'RESUME_BATCH',
+      jobId,
+    );
+  }
 
   @Post()
   @HttpCode(HttpStatus.CREATED)
