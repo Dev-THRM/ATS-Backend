@@ -13,6 +13,14 @@ import {
   Inject,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
+import { Throttle } from '@nestjs/throttler';
+import {
+  ApiTags,
+  ApiOperation,
+  ApiResponse,
+  ApiBearerAuth,
+  ApiConsumes,
+} from '@nestjs/swagger';
 import { AuthService } from './auth.service.js';
 import { RegisterDto } from './dto/register.dto.js';
 import { LoginDto } from './dto/login.dto.js';
@@ -27,6 +35,8 @@ import {
   UserSummary,
 } from './interfaces/auth-response.interface.js';
 
+@ApiTags('Authentication & Organization')
+@ApiBearerAuth('JWT-auth')
 @Controller('auth')
 @UseGuards(JwtAuthGuard)
 export class AuthController {
@@ -40,7 +50,9 @@ export class AuthController {
    */
   @Public()
   @Get('check-slug')
+  @Throttle({ default: { limit: 60, ttl: 60000 } })
   @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Check organization slug availability' })
   async checkSlug(
     @Query('slug') slug: string,
   ): Promise<{ slug: string; available: boolean }> {
@@ -53,7 +65,11 @@ export class AuthController {
    */
   @Public()
   @Post('register')
+  @Throttle({ default: { limit: 20, ttl: 60000 } })
   @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({ summary: 'Register a new tenant organization and owner user' })
+  @ApiResponse({ status: 201, description: 'Registration successful.' })
+  @ApiResponse({ status: 409, description: 'Slug or email already in use.' })
   async register(
     @Body() dto: RegisterDto,
     @Query('plan') plan?: string,
@@ -67,7 +83,11 @@ export class AuthController {
    */
   @Public()
   @Post('login')
+  @Throttle({ default: { limit: 25, ttl: 60000 } })
   @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Login user with email and password' })
+  @ApiResponse({ status: 200, description: 'Login successful, returns JWT tokens.' })
+  @ApiResponse({ status: 401, description: 'Invalid email or password.' })
   async login(
     @Body() dto: LoginDto,
     @Query('organizationSlug') queryOrgSlug?: string,
@@ -85,7 +105,9 @@ export class AuthController {
    */
   @Public()
   @Post('refresh')
+  @Throttle({ default: { limit: 30, ttl: 60000 } })
   @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Refresh JWT access token using valid refresh token' })
   async refresh(
     @Body() bodyDto: Partial<RefreshTokenDto>,
     @Query('refreshToken') queryRefreshToken?: string,
@@ -100,6 +122,7 @@ export class AuthController {
    */
   @Post('logout')
   @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Logout user and revoke refresh token' })
   async logout(
     @CurrentUser('userId') userId: string,
     @Query('allDevices') allDevices?: string,
@@ -114,6 +137,7 @@ export class AuthController {
    */
   @Get('me')
   @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Get profile and permissions of authenticated user' })
   async getMe(
     @CurrentUser('userId') userId: string,
     @Query('includePermissions') includePermissions?: string,
@@ -133,6 +157,7 @@ export class AuthController {
    */
   @Get('organization')
   @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Get current tenant organization profile' })
   async getOrganization(
     @CurrentUser('userId') userId: string,
   ): Promise<any> {
@@ -145,6 +170,7 @@ export class AuthController {
    */
   @Patch('organization')
   @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Update tenant organization settings' })
   async updateOrganization(
     @CurrentUser('userId') userId: string,
     @Body() dto: UpdateOrganizationDto,
@@ -159,6 +185,8 @@ export class AuthController {
   @Post('organization/logo')
   @HttpCode(HttpStatus.OK)
   @UseInterceptors(FileInterceptor('file'))
+  @ApiOperation({ summary: 'Upload organization logo image' })
+  @ApiConsumes('multipart/form-data')
   async uploadOrganizationLogo(
     @CurrentUser('userId') userId: string,
     @UploadedFile() file: Express.Multer.File,
@@ -166,3 +194,4 @@ export class AuthController {
     return this.authService.uploadOrganizationLogo(userId, file);
   }
 }
+
