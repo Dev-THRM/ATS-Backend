@@ -199,14 +199,16 @@ export class InterviewsService {
         : {}),
     };
 
-    const skip = (page - 1) * limit;
+    const pageNum = Math.max(1, Number(page) || 1);
+    const limitNum = Math.max(1, Number(limit) || 20);
+    const skip = (pageNum - 1) * limitNum;
 
     const [total, interviews] = await Promise.all([
       this.prisma.interview.count({ where }),
       this.prisma.interview.findMany({
         where,
         skip,
-        take: limit,
+        take: limitNum,
         orderBy: { scheduledAt: 'asc' },
         include: {
           candidate: true,
@@ -233,9 +235,9 @@ export class InterviewsService {
       data: interviews,
       meta: {
         total,
-        page,
-        limit,
-        totalPages: Math.ceil(total / limit) || 1,
+        page: pageNum,
+        limit: limitNum,
+        totalPages: Math.ceil(total / limitNum) || 1,
       },
     };
   }
