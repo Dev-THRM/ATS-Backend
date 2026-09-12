@@ -1,10 +1,9 @@
 import { NestFactory } from '@nestjs/core';
-import { ValidationPipe } from '@nestjs/common';
+import { ValidationPipe, Logger } from '@nestjs/common';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import helmet from 'helmet';
 import express from 'express';
 import * as path from 'node:path';
-import { Logger } from 'nestjs-pino';
 import { AppModule } from './app.module.js';
 import { initSentry } from './common/sentry/sentry.init.js';
 import { SentryExceptionFilter } from './common/filters/sentry-exception.filter.js';
@@ -13,11 +12,8 @@ import { SentryExceptionFilter } from './common/filters/sentry-exception.filter.
 initSentry();
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule, { bufferLogs: true });
-
-  // Use structured logger (Pino)
-  const logger = app.get(Logger);
-  app.useLogger(logger);
+  const app = await NestFactory.create(AppModule);
+  const logger = new Logger('Bootstrap');
 
   // Apply Helmet HTTP security headers (allow cross-origin for local asset preview like resumes/logos)
   app.use(
