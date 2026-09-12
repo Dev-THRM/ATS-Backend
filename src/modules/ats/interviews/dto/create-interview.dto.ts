@@ -18,6 +18,14 @@ export class CreateInterviewDto {
 
   @IsString()
   @IsOptional()
+  candidateId?: string;
+
+  @IsString()
+  @IsOptional()
+  jobId?: string;
+
+  @IsString()
+  @IsOptional()
   interviewerId?: string;
 
   @IsString()
