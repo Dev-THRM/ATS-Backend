@@ -121,7 +121,18 @@ export class CandidatesService {
     const where: Prisma.CandidateWhereInput = {
       organizationId,
       ...(source && { source }),
-      ...(skill && { skills: { has: skill } }),
+      ...(skill && {
+        skills: {
+          hasSome: Array.from(
+            new Set([
+              skill,
+              skill.toLowerCase(),
+              skill.toUpperCase(),
+              skill.charAt(0).toUpperCase() + skill.slice(1).toLowerCase(),
+            ]),
+          ),
+        },
+      }),
       ...(tag && { tags: { has: tag } }),
       ...(search && {
         OR: [
