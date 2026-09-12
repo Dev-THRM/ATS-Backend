@@ -130,34 +130,8 @@ describe('Phase 0: Complete Auth, RBAC & Plan-Gating E2E Test', () => {
     expect(res.body.job.title).toBe('Full Stack Engineer');
   });
 
-  // 6. Plan-Gating REJECTION: CRM Module (Blocked because org ONLY has ATS)
-  it('6. Attempt CRM module (POST /api/v1/crm/leads) -> 403 Forbidden', async () => {
-    const res = await request(app.getHttpServer())
-      .post('/api/v1/crm/leads')
-      .set('Authorization', `Bearer ${accessToken}`)
-      .send({
-        companyName: 'Test Corp',
-        contactName: 'Jane',
-        contactEmail: 'jane@test.com',
-        dealValue: 10000,
-      })
-      .expect(403);
-
-    expect(res.body.message).toContain('Your organization does not have an active subscription for the [CRM] module');
-  });
-
-  // 7. Plan-Gating REJECTION: HRMS Module (Blocked because org ONLY has ATS)
-  it('7. Attempt HRMS module (GET /api/v1/hrms/dashboard) -> 403 Forbidden', async () => {
-    const res = await request(app.getHttpServer())
-      .get('/api/v1/hrms/dashboard')
-      .set('Authorization', `Bearer ${accessToken}`)
-      .expect(403);
-
-    expect(res.body.message).toContain('Your organization does not have an active subscription for the [HRMS] module');
-  });
-
-  // 8. Auth REJECTION: No token on protected route -> 401 Unauthorized
-  it('8. Access protected route without token -> 401 Unauthorized', async () => {
+  // 6. Auth REJECTION: No token on protected route -> 401 Unauthorized
+  it('6. Access protected route without token -> 401 Unauthorized', async () => {
     await request(app.getHttpServer())
       .get('/api/v1/ats/dashboard')
       .expect(401);

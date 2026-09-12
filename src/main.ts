@@ -84,7 +84,7 @@ async function bootstrap() {
 
   // Setup Swagger / OpenAPI Documentation
   const swaggerConfig = new DocumentBuilder()
-    .setTitle('ATS-HRMS-CRM Platform API')
+    .setTitle('ATS Platform API')
     .setDescription(
       'Multi-tenant enterprise ATS backend with AI resume scoring, candidate WhatsApp messaging, and interview scheduling.',
     )

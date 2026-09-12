@@ -37,14 +37,14 @@ describe('PlanGuard', () => {
 
   it('should allow access when organization has required plan active', () => {
     vi.spyOn(reflector, 'getAllAndOverride').mockReturnValue([AppPlan.ATS]);
-    const context = createMockContext([AppPlan.ATS, AppPlan.HRMS]);
+    const context = createMockContext([AppPlan.ATS]);
 
     expect(guard.canActivate(context)).toBe(true);
   });
 
   it('should throw ForbiddenException when organization lacks required subscription plan', () => {
-    vi.spyOn(reflector, 'getAllAndOverride').mockReturnValue([AppPlan.CRM]);
-    const context = createMockContext([AppPlan.ATS]); // Only has ATS, trying to access CRM
+    vi.spyOn(reflector, 'getAllAndOverride').mockReturnValue(['ENTERPRISE_CUSTOM' as any]);
+    const context = createMockContext([AppPlan.ATS]); // Only has ATS, trying to access ENTERPRISE_CUSTOM
 
     expect(() => guard.canActivate(context)).toThrow(ForbiddenException);
   });

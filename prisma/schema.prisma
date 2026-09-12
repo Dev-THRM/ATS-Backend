@@ -12,8 +12,6 @@ datasource db {
 
 enum AppPlan {
   ATS
-  HRMS
-  CRM
 }
 
 enum SubscriptionStatus {
@@ -270,8 +268,6 @@ model Application {
 
 enum EntityPipelineType {
   APPLICATION
-  CRM_DEAL
-  CRM_LEAD
 }
 
 model StageTransitionLog {

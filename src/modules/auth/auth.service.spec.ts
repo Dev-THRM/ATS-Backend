@@ -38,7 +38,7 @@ describe('AuthService', () => {
       slug: 'acme',
       subscriptions: [
         {
-          activePlans: [AppPlan.ATS, AppPlan.HRMS, AppPlan.CRM],
+          activePlans: [AppPlan.ATS],
           status: 'TRIALING',
         },
       ],

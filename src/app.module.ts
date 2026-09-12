@@ -9,8 +9,6 @@ import { AppService } from './app.service.js';
 import { SharedModule } from './modules/shared/shared.module.js';
 import { AuthModule } from './modules/auth/auth.module.js';
 import { AtsModule } from './modules/ats/ats.module.js';
-import { HrmsModule } from './modules/hrms/hrms.module.js';
-import { CrmModule } from './modules/crm/crm.module.js';
 import { HealthModule } from './modules/health/health.module.js';
 
 @Module({
@@ -55,8 +53,6 @@ import { HealthModule } from './modules/health/health.module.js';
     SharedModule,
     AuthModule,
     AtsModule,
-    HrmsModule,
-    CrmModule,
     HealthModule,
   ],
   controllers: [AppController],

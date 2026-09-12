@@ -122,7 +122,7 @@ export class AuthService {
     }
 
     // Determine initial plans based on query param if passed
-    let selectedPlans: AppPlan[] = [AppPlan.ATS, AppPlan.HRMS, AppPlan.CRM];
+    let selectedPlans: AppPlan[] = [AppPlan.ATS];
     if (initialPlan) {
       const upperPlan = initialPlan.toUpperCase().trim();
       if (Object.values(AppPlan).includes(upperPlan as AppPlan)) {
