@@ -86,8 +86,9 @@ export class ResumeParserService {
 
     for (const skill of COMMON_SKILLS_DICTIONARY) {
       const escaped = skill.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&');
+      // Use word boundary to avoid matching "go" in "going" or "java" in "javascript"
       const regex = new RegExp(`\\b${escaped}\\b`, 'i');
-      if (regex.test(text) || lowerText.includes(skill.toLowerCase())) {
+      if (regex.test(text)) {
         skills.add(skill);
       }
     }
