@@ -198,6 +198,7 @@ export class ResumesService {
     return {
       message: 'Resume uploaded successfully and processed for AI parsing',
       key,
+      url,
       resumeUrl: url,
       fileName: file.originalname,
       fileSize: file.size,

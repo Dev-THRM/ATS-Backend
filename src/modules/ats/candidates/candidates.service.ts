@@ -16,7 +16,7 @@ import { BulkImportCsvDto } from './dto/bulk-import.dto.js';
 import { randomUUID } from 'node:crypto';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
-import { NOTIFICATION_QUEUE } from '../../shared/queue/queue.module.js';
+import { NOTIFICATION_QUEUE, RESUME_QUEUE } from '../../shared/queue/queue.module.js';
 
 @Injectable()
 export class CandidatesService {
@@ -25,6 +25,7 @@ export class CandidatesService {
     @Optional() @Inject(StorageService) private readonly storageService?: StorageService,
     @Optional() @Inject(ResumeParserService) private readonly resumeParser?: ResumeParserService,
     @Optional() @InjectQueue(NOTIFICATION_QUEUE) private readonly notificationQueue?: Queue,
+    @Optional() @InjectQueue(RESUME_QUEUE) private readonly resumeQueue?: Queue,
   ) {}
 
   /**
@@ -133,6 +134,12 @@ export class CandidatesService {
       }
 
       if (firstStageId) {
+        const resumeKey = candidate.resumeUrl
+          ? candidate.resumeUrl.includes('resumes/')
+            ? 'resumes/' + candidate.resumeUrl.split('resumes/')[1]
+            : candidate.resumeUrl.replace(/^\/?storage\//, '')
+          : null;
+
         const effectiveSource = (candidate.source || 'MANUAL_ENTRY').toUpperCase().trim();
         const app = await this.prisma.application.create({
           data: {
@@ -145,7 +152,12 @@ export class CandidatesService {
             utmSource: 'candidate_form',
             coverLetter: coverLetter || undefined,
             metadata: {
-              ...(candidate.resumeUrl ? { resumeUrl: candidate.resumeUrl } : {}),
+              ...(candidate.resumeUrl
+                ? {
+                    resumeUrl: candidate.resumeUrl,
+                    resumeKey: resumeKey || candidate.resumeUrl,
+                  }
+                : {}),
               appliedVia: effectiveSource,
               sourceChannel: effectiveSource,
             },
@@ -160,6 +172,18 @@ export class CandidatesService {
           },
         });
         createdApplications.push(app);
+
+        // If resume is attached, enqueue AI resume parsing
+        if (resumeKey && this.resumeQueue) {
+          await this.resumeQueue.add('parse-resume', {
+            organizationId,
+            candidateId: candidate.id,
+            jobId: job.id,
+            applicationId: app.id,
+            resumeKey,
+            resumeUrl: candidate.resumeUrl,
+          });
+        }
 
         // Enqueue candidate application receipt notification
         if (this.notificationQueue) {
