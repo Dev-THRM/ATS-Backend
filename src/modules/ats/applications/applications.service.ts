@@ -554,13 +554,7 @@ export class ApplicationsService {
         ? app.candidate.resumeUrl.split('storage/')[1] || app.candidate.resumeUrl
         : null);
 
-    if (!resumeKey) {
-      // Check if it's an external URL (like Google Drive) that we can't parse text from directly
-      if (app.candidate.resumeUrl?.includes('drive.google.com')) {
-        throw new BadRequestException(
-          'Cannot run AI scoring on Google Drive links. Please upload a physical PDF or Word document for this candidate to enable AI ATS matching.',
-        );
-      }
+    if (!resumeKey && !app.candidate.resumeUrl?.includes('drive.google.com')) {
       if (app.candidate.resumeUrl?.startsWith('http') && !app.candidate.resumeUrl.includes('resumes/')) {
         throw new BadRequestException(
           'Cannot run AI scoring on external URLs. Please upload a physical PDF or Word document to enable AI ATS matching.',

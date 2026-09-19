@@ -337,11 +337,38 @@ export class ResumesService {
       // 1. Get file buffer (may already be provided from upload, else fetch from storage)
       let fileBuffer = opts.fileBuffer;
       if (!fileBuffer || fileBuffer.length === 0) {
-        try {
-          fileBuffer = await this.storageService.getFileBuffer(resumeKey);
-        } catch {
-          this.logger.warn(`Inline scoring: file not found in storage for key: ${resumeKey}`);
-          return;
+        if (opts.resumeUrl && opts.resumeUrl.includes('drive.google.com')) {
+          try {
+            const urlObj = new URL(opts.resumeUrl);
+            let driveId = urlObj.searchParams.get('id');
+            if (!driveId) {
+              const parts = urlObj.pathname.split('/');
+              const dIndex = parts.indexOf('d');
+              if (dIndex !== -1 && parts.length > dIndex + 1) {
+                driveId = parts[dIndex + 1];
+              }
+            }
+            if (driveId) {
+              this.logger.log(`Inline scoring: Fetching Google Drive file natively: ${driveId}`);
+              const res = await fetch(`https://drive.google.com/uc?export=download&id=${driveId}`);
+              if (res.ok) {
+                const arrayBuf = await res.arrayBuffer();
+                fileBuffer = Buffer.from(arrayBuf);
+              } else {
+                throw new Error(`Google Drive download failed with status ${res.status}`);
+              }
+            }
+          } catch (err: any) {
+            this.logger.warn(`Inline scoring: Failed to fetch from Google Drive: ${err.message}`);
+            return;
+          }
+        } else {
+          try {
+            fileBuffer = await this.storageService.getFileBuffer(resumeKey);
+          } catch {
+            this.logger.warn(`Inline scoring: file not found in storage for key: ${resumeKey}`);
+            return;
+          }
         }
       }
 
