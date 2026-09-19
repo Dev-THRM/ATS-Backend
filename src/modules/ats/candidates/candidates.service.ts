@@ -14,6 +14,9 @@ import { UpdateCandidateDto } from './dto/update-candidate.dto.js';
 import { QueryCandidatesDto } from './dto/query-candidates.dto.js';
 import { BulkImportCsvDto } from './dto/bulk-import.dto.js';
 import { randomUUID } from 'node:crypto';
+import { InjectQueue } from '@nestjs/bullmq';
+import { Queue } from 'bullmq';
+import { NOTIFICATION_QUEUE } from '../../shared/queue/queue.module.js';
 
 @Injectable()
 export class CandidatesService {
@@ -21,6 +24,7 @@ export class CandidatesService {
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Optional() @Inject(StorageService) private readonly storageService?: StorageService,
     @Optional() @Inject(ResumeParserService) private readonly resumeParser?: ResumeParserService,
+    @Optional() @InjectQueue(NOTIFICATION_QUEUE) private readonly notificationQueue?: Queue,
   ) {}
 
   /**
@@ -44,13 +48,170 @@ export class CandidatesService {
       );
     }
 
-    return this.prisma.candidate.create({
+    const { jobId, jobIds, positions, coverLetter, ...candidateData } = dto;
+
+    const candidate = await this.prisma.candidate.create({
       data: {
-        ...dto,
+        ...candidateData,
+        lastName: candidateData.lastName || '',
         email,
         organizationId,
       },
     });
+
+    // Collect all candidate target jobs
+    const orgJobs = await this.prisma.job.findMany({
+      where: { organizationId, status: 'OPEN' },
+      include: { pipelineStages: { orderBy: { order: 'asc' } } },
+    });
+
+    const targetJobs: typeof orgJobs = [];
+
+    const matchPosition = (pos: string) => {
+      const p = pos.toLowerCase().trim();
+      if (!p) return null;
+      let j = orgJobs.find((x) => x.id === pos);
+      if (j) return j;
+      j = orgJobs.find((x) => x.title.toLowerCase().trim() === p);
+      if (j) return j;
+      j = orgJobs.find((x) => x.title.toLowerCase().includes(p) || p.includes(x.title.toLowerCase()));
+      if (j) return j;
+      const pWords = p.replace(/[^a-z0-9\s]/g, '').split(/\s+/).filter((w) => w.length > 2);
+      let bestMatch: any = null;
+      let maxOverlap = 0;
+      for (const candidateJob of orgJobs) {
+        const jobWords = candidateJob.title.toLowerCase().replace(/[^a-z0-9\s]/g, '').split(/\s+/).filter((w) => w.length > 2);
+        const overlap = pWords.filter((w) => jobWords.includes(w)).length;
+        if (overlap > maxOverlap && overlap >= 1) {
+          maxOverlap = overlap;
+          bestMatch = candidateJob;
+        }
+      }
+      return bestMatch;
+    };
+
+    if (jobId) {
+      const found = matchPosition(jobId);
+      if (found && !targetJobs.some((x) => x.id === found.id)) targetJobs.push(found);
+    }
+    if (Array.isArray(jobIds)) {
+      for (const id of jobIds) {
+        const found = matchPosition(id);
+        if (found && !targetJobs.some((x) => x.id === found.id)) targetJobs.push(found);
+      }
+    }
+    if (Array.isArray(positions)) {
+      for (const pos of positions) {
+        const found = matchPosition(pos);
+        if (found && !targetJobs.some((x) => x.id === found.id)) targetJobs.push(found);
+      }
+    }
+
+    const createdApplications: any[] = [];
+    for (const job of targetJobs) {
+      let firstStageId = job.pipelineStages[0]?.id;
+      if (!firstStageId) {
+        const defaultStages = [
+          { name: 'Applied', order: 0, color: '#3B82F6', isSystemStage: true },
+          { name: 'Screening', order: 1, color: '#8B5CF6', isSystemStage: false },
+          { name: 'Technical Round', order: 2, color: '#F59E0B', isSystemStage: false },
+          { name: 'HR Round', order: 3, color: '#EC4899', isSystemStage: false },
+          { name: 'Offer', order: 4, color: '#10B981', isSystemStage: true },
+          { name: 'Hired', order: 5, color: '#059669', isSystemStage: true },
+          { name: 'Rejected', order: 6, color: '#EF4444', isSystemStage: true },
+        ];
+        for (const s of defaultStages) {
+          const st = await this.prisma.pipelineStage.create({
+            data: {
+              ...s,
+              jobId: job.id,
+              organizationId,
+            },
+          });
+          if (!firstStageId) firstStageId = st.id;
+        }
+      }
+
+      if (firstStageId) {
+        const effectiveSource = (candidate.source || 'MANUAL_ENTRY').toUpperCase().trim();
+        const app = await this.prisma.application.create({
+          data: {
+            organizationId,
+            jobId: job.id,
+            candidateId: candidate.id,
+            currentStageId: firstStageId,
+            status: 'ACTIVE',
+            source: effectiveSource,
+            utmSource: 'candidate_form',
+            coverLetter: coverLetter || undefined,
+            metadata: {
+              ...(candidate.resumeUrl ? { resumeUrl: candidate.resumeUrl } : {}),
+              appliedVia: effectiveSource,
+              sourceChannel: effectiveSource,
+            },
+          },
+          include: {
+            job: {
+              select: { id: true, title: true, department: true },
+            },
+            currentStage: {
+              select: { id: true, name: true, order: true },
+            },
+          },
+        });
+        createdApplications.push(app);
+
+        // Enqueue candidate application receipt notification
+        if (this.notificationQueue) {
+          const org = await this.prisma.organization.findUnique({
+            where: { id: organizationId },
+            select: { name: true },
+          });
+          const companyName = org?.name || 'THRM Digital Marketing Agency';
+
+          await this.notificationQueue.add('send-candidate-status-update', {
+            applicationId: app.id,
+            candidateId: candidate.id,
+            candidateName: `${candidate.firstName} ${candidate.lastName}`.trim(),
+            candidatePhone: candidate.phone,
+            candidateEmail: candidate.email,
+            jobId: job.id,
+            jobTitle: job.title,
+            companyName,
+            stageName: app.currentStage?.name || 'Applied',
+            fromStageName: null,
+          });
+        }
+      }
+    }
+
+    // If candidate was added directly to talent pool without any active job application
+    if (createdApplications.length === 0 && this.notificationQueue) {
+      const org = await this.prisma.organization.findUnique({
+        where: { id: organizationId },
+        select: { name: true },
+      });
+      const companyName = org?.name || 'THRM Digital Marketing Agency';
+
+      await this.notificationQueue.add('send-candidate-status-update', {
+        applicationId: '',
+        candidateId: candidate.id,
+        candidateName: `${candidate.firstName} ${candidate.lastName}`.trim(),
+        candidatePhone: candidate.phone,
+        candidateEmail: candidate.email,
+        jobId: '',
+        jobTitle: candidate.currentTitle || 'Applicant Profile',
+        companyName,
+        stageName: 'Applied',
+        fromStageName: null,
+      });
+    }
+
+    return {
+      ...candidate,
+      application: createdApplications[0] || null,
+      applications: createdApplications,
+    };
   }
 
   /**
@@ -73,10 +234,13 @@ export class CandidatesService {
       },
     });
 
+    const { jobId, jobIds, positions, coverLetter, ...cleanDto } = dto;
+
     if (!candidate) {
       candidate = await client.candidate.create({
         data: {
-          ...dto,
+          ...cleanDto,
+          lastName: cleanDto.lastName || '',
           email,
           organizationId,
         },

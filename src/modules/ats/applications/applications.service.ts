@@ -161,6 +161,11 @@ export class ApplicationsService {
             title: true,
             department: true,
             status: true,
+            organization: {
+              select: {
+                name: true,
+              },
+            },
           },
         },
         currentStage: true,
@@ -200,6 +205,8 @@ export class ApplicationsService {
 
     // Enqueue candidate application receipt notification
     if (this.notificationQueue) {
+      const companyName =
+        (application.job as any)?.organization?.name || 'THRM Digital Marketing Agency';
       await this.notificationQueue.add('send-candidate-status-update', {
         applicationId: application.id,
         candidateId,
@@ -208,7 +215,7 @@ export class ApplicationsService {
         candidateEmail: application.candidate.email,
         jobId: dto.jobId,
         jobTitle: application.job.title,
-        companyName: job.title ? 'Our Company' : 'Our Company',
+        companyName,
         stageName: initialStageName,
         fromStageName: null,
       });
@@ -455,6 +462,11 @@ export class ApplicationsService {
             title: true,
             department: true,
             status: true,
+            organization: {
+              select: {
+                name: true,
+              },
+            },
           },
         },
         currentStage: true,
@@ -481,6 +493,8 @@ export class ApplicationsService {
 
     // Enqueue candidate status transition notification
     if (this.notificationQueue) {
+      const companyName =
+        (updated.job as any)?.organization?.name || 'THRM Digital Marketing Agency';
       await this.notificationQueue.add('send-candidate-status-update', {
         applicationId: updated.id,
         candidateId: updated.candidateId,
@@ -489,7 +503,7 @@ export class ApplicationsService {
         candidateEmail: updated.candidate.email,
         jobId: updated.jobId,
         jobTitle: updated.job.title,
-        companyName: 'Our Company',
+        companyName,
         stageName: targetStage.name,
         fromStageName: application.currentStage.name,
         rejectionReason,
@@ -566,6 +580,10 @@ export class ApplicationsService {
       );
     }
 
+    const effectiveResumeKey =
+      resumeKey ||
+      (app.candidate.resumeUrl?.includes('drive.google.com') ? 'google-drive-link' : '');
+
     // Try BullMQ queue first
     let queuedSuccessfully = false;
     if (this.resumeQueue) {
@@ -575,7 +593,7 @@ export class ApplicationsService {
           candidateId: app.candidateId,
           jobId: app.jobId,
           applicationId: app.id,
-          resumeKey,
+          resumeKey: effectiveResumeKey,
           resumeUrl: app.candidate.resumeUrl,
         });
         queuedSuccessfully = true;
@@ -593,7 +611,7 @@ export class ApplicationsService {
       this.resumesService
         .runInlineScoring({
           organizationId,
-          resumeKey,
+          resumeKey: effectiveResumeKey,
           resumeUrl: app.candidate.resumeUrl ?? undefined,
           candidateId: app.candidateId,
           applicationId: app.id,
@@ -640,6 +658,11 @@ export class ApplicationsService {
             title: true,
             department: true,
             status: true,
+            organization: {
+              select: {
+                name: true,
+              },
+            },
           },
         },
         currentStage: true,
@@ -647,6 +670,8 @@ export class ApplicationsService {
     });
 
     if (this.notificationQueue) {
+      const companyName =
+        (updated.job as any)?.organization?.name || 'THRM Digital Marketing Agency';
       await this.notificationQueue.add('send-candidate-status-update', {
         applicationId: updated.id,
         candidateId: updated.candidateId,
@@ -655,7 +680,7 @@ export class ApplicationsService {
         candidateEmail: updated.candidate.email,
         jobId: updated.jobId,
         jobTitle: updated.job.title,
-        companyName: 'Our Company',
+        companyName,
         stageName: status,
         rejectionReason,
       });

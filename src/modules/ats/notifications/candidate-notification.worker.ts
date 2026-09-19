@@ -1,10 +1,12 @@
 import { Processor, WorkerHost } from '@nestjs/bullmq';
-import { Logger, Inject } from '@nestjs/common';
+import { Logger, Inject, Optional } from '@nestjs/common';
 import { Job } from 'bullmq';
 import { NOTIFICATION_QUEUE } from '../../shared/queue/queue.module.js';
 import { PrismaService } from '../../shared/prisma/prisma.service.js';
 import { WhatsAppTemplatesService } from './whatsapp-templates.service.js';
 import { WhatsAppService } from './whatsapp.service.js';
+import { EmailService } from './email.service.js';
+import { EmailTemplatesService } from './email-templates.service.js';
 
 export interface CandidateStatusUpdateJobData {
   applicationId: string;
@@ -41,14 +43,25 @@ export interface InterviewNotificationJobData {
 @Processor(NOTIFICATION_QUEUE)
 export class CandidateNotificationWorker extends WorkerHost {
   private readonly logger = new Logger(CandidateNotificationWorker.name);
+  private readonly emailService: EmailService;
+  private readonly emailTemplatesService: EmailTemplatesService;
 
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(WhatsAppTemplatesService)
     private readonly templatesService: WhatsAppTemplatesService,
     @Inject(WhatsAppService) private readonly whatsAppService: WhatsAppService,
+    @Optional()
+    @Inject(EmailService)
+    emailService?: EmailService,
+    @Optional()
+    @Inject(EmailTemplatesService)
+    emailTemplatesService?: EmailTemplatesService,
   ) {
     super();
+    this.emailService = emailService || new EmailService();
+    this.emailTemplatesService =
+      emailTemplatesService || new EmailTemplatesService();
   }
 
   async process(job: Job<any>): Promise<any> {
@@ -72,6 +85,7 @@ export class CandidateNotificationWorker extends WorkerHost {
       applicationId,
       candidateName,
       candidatePhone,
+      candidateEmail,
       jobTitle,
       companyName,
       stageName,
@@ -79,8 +93,10 @@ export class CandidateNotificationWorker extends WorkerHost {
       customNotes,
     } = job.data;
 
+    const resolvedCompany = companyName || 'THRM Digital Marketing Agency';
+
     this.logger.log(
-      `Processing status update notification for candidate ${candidateName} (Application: ${applicationId}) -> Stage: ${stageName}`,
+      `Processing status update notification for candidate ${candidateName} (${candidateEmail || candidatePhone || 'no-contact'}) -> Stage: ${stageName}`,
     );
 
     if (applicationId) {
@@ -95,79 +111,154 @@ export class CandidateNotificationWorker extends WorkerHost {
       }
     }
 
-    if (!candidatePhone) {
+    if (!candidatePhone && !candidateEmail) {
       this.logger.warn(
-        `Candidate ${candidateName} has no phone number attached. Skipping WhatsApp dispatch.`,
+        `Candidate ${candidateName} has neither phone number nor email attached. Skipping dispatch.`,
       );
       return { skipped: true, reason: 'NO_PHONE_NUMBER' };
     }
 
-    // 1. Render stage-specific message template
-    const rendered = this.templatesService.renderStageUpdateMessage({
-      candidateName,
-      jobTitle,
-      companyName: companyName || 'Our Company',
-      stageName,
-      rejectionReason: rejectionReason || undefined,
-      customNotes: customNotes || undefined,
-    });
+    const newLogs: any[] = [];
+    let emailResult: any = null;
+    let whatsAppResult: any = null;
 
-    // 2. Dispatch via active WhatsApp Driver
-    const sendResult = await this.whatsAppService.send({
-      to: candidatePhone,
-      templateName: rendered.templateName,
-      languageCode: rendered.languageCode,
-      parameters: rendered.parameters,
-      bodyText: rendered.bodyText,
-    });
+    // -------------------------------------------------------------------------
+    // 1. WhatsApp Dispatch (if candidate phone is present)
+    // -------------------------------------------------------------------------
+    if (candidatePhone) {
+      try {
+        const rendered = this.templatesService.renderStageUpdateMessage({
+          candidateName,
+          jobTitle,
+          companyName: resolvedCompany,
+          stageName,
+          rejectionReason: rejectionReason || undefined,
+          customNotes: customNotes || undefined,
+        });
 
-    // 3. Persist dispatch log to Application metadata for HR visibility
-    try {
-      const application = await this.prisma.application.findUnique({
-        where: { id: applicationId },
-      });
+        whatsAppResult = await this.whatsAppService.send({
+          to: candidatePhone,
+          templateName: rendered.templateName,
+          languageCode: rendered.languageCode,
+          parameters: rendered.parameters,
+          bodyText: rendered.bodyText,
+        });
 
-      if (application) {
-        const metadata = (application.metadata as Record<string, any>) || {};
-        const communications = Array.isArray(metadata.communications)
-          ? metadata.communications
-          : [];
-
-        communications.push({
+        newLogs.push({
           channel: 'WHATSAPP',
           stage: stageName,
           templateName: rendered.templateName,
           recipientPhone: candidatePhone,
           messagePreview: rendered.bodyText,
-          messageId: sendResult.messageId || null,
-          provider: sendResult.provider,
-          success: sendResult.success,
-          error: sendResult.error || null,
-          sentAt: sendResult.timestamp,
+          messageId: whatsAppResult.messageId || null,
+          provider: whatsAppResult.provider,
+          success: whatsAppResult.success,
+          error: whatsAppResult.error || null,
+          sentAt: whatsAppResult.timestamp,
         });
-
-        await this.prisma.application.updateMany({
-          where: { id: applicationId },
-          data: {
-            metadata: {
-              ...metadata,
-              communications,
-              lastContactedAt: new Date().toISOString(),
-            },
-          },
-        });
+      } catch (waErr: any) {
+        this.logger.error(`Error sending WhatsApp to ${candidatePhone}: ${waErr.message}`);
       }
-    } catch (dbErr: any) {
-      this.logger.error(
-        `Failed to update application metadata with notification log: ${dbErr.message}`,
-      );
     }
 
+    // -------------------------------------------------------------------------
+    // 2. Email Dispatch (Application Received, Offer Cleared, or Rejection)
+    // -------------------------------------------------------------------------
+    if (candidateEmail && candidateEmail.includes('@')) {
+      try {
+        const renderedEmail = this.emailTemplatesService.renderStageEmail({
+          candidateName,
+          jobTitle,
+          companyName: resolvedCompany,
+          stageName,
+          rejectionReason,
+          customNotes,
+        });
+
+        emailResult = await this.emailService.sendMail({
+          to: candidateEmail,
+          subject: renderedEmail.subject,
+          html: renderedEmail.html,
+          text: renderedEmail.text,
+        });
+
+        newLogs.push({
+          channel: 'EMAIL',
+          stage: stageName,
+          subject: renderedEmail.subject,
+          messagePreview: renderedEmail.text,
+          recipientEmail: candidateEmail,
+          messageId: emailResult.messageId || null,
+          provider: emailResult.simulated ? 'GMAIL_SIMULATED' : 'GMAIL_SMTP',
+          success: emailResult.success,
+          error: emailResult.error || null,
+          sentAt: emailResult.timestamp,
+        });
+      } catch (emailErr: any) {
+        this.logger.error(`Error sending email to ${candidateEmail}: ${emailErr.message}`);
+        newLogs.push({
+          channel: 'EMAIL',
+          stage: stageName,
+          recipientEmail: candidateEmail,
+          success: false,
+          error: emailErr.message,
+          sentAt: new Date().toISOString(),
+        });
+      }
+    } else {
+      this.logger.debug(`Candidate ${candidateName} has no valid email address. Skipping email dispatch.`);
+    }
+
+    // -------------------------------------------------------------------------
+    // 3. Persist audit logs to Application metadata
+    // -------------------------------------------------------------------------
+    if (applicationId && newLogs.length > 0) {
+      try {
+        const application = await this.prisma.application.findUnique({
+          where: { id: applicationId },
+        });
+
+        if (application) {
+          const metadata = (application.metadata as Record<string, any>) || {};
+          const communications = Array.isArray(metadata.communications)
+            ? metadata.communications
+            : [];
+
+          communications.push(...newLogs);
+
+          await this.prisma.application.updateMany({
+            where: { id: applicationId },
+            data: {
+              metadata: {
+                ...metadata,
+                communications,
+                lastContactedAt: new Date().toISOString(),
+              },
+            },
+          });
+        }
+      } catch (dbErr: any) {
+        this.logger.error(
+          `Failed to update application metadata with notification log: ${dbErr.message}`,
+        );
+      }
+    }
+
+    const templateName =
+      whatsAppResult?.templateName ||
+      (rejectionReason
+        ? 'ats_stage_rejected'
+        : stageName.toLowerCase().includes('offer')
+          ? 'ats_stage_offer'
+          : 'ats_stage_interview');
+
     return {
-      success: sendResult.success,
-      messageId: sendResult.messageId,
-      provider: sendResult.provider,
-      templateName: rendered.templateName,
+      success: Boolean(emailResult?.success || whatsAppResult?.success),
+      templateName,
+      messageId: whatsAppResult?.messageId || emailResult?.messageId,
+      provider: whatsAppResult?.provider || emailResult?.provider,
+      emailResult,
+      whatsAppResult,
     };
   }
 

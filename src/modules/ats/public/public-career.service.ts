@@ -295,76 +295,285 @@ export class PublicCareerService {
   }
 
   /**
+  /**
    * Headless JSON candidate ingestion endpoint for third-party job boards & webhook integrations
-   * (e.g. LinkedIn Easy Apply webhook, Naukri applicant integration, Unstop API).
+   * (e.g. Google Forms, LinkedIn Easy Apply webhook, Naukri applicant integration, Unstop API).
    */
   async ingestCandidate(
     orgSlug: string,
-    jobId: string,
-    dto: PublicApplyJobDto & { resumeUrl?: string },
+    jobId?: string,
+    dto?: Record<string, any>,
   ) {
+    if (!dto) {
+      throw new BadRequestException('Application payload is required');
+    }
+
     const org = await this.prisma.organization.findUnique({
       where: { slug: orgSlug },
+      include: {
+        jobs: {
+          where: { status: JobStatus.OPEN },
+          include: { pipelineStages: { orderBy: { order: 'asc' }, take: 1 } },
+        },
+      },
     });
 
     if (!org) {
       throw new NotFoundException(`Organization with slug '${orgSlug}' not found`);
     }
 
-    const job = await this.prisma.job.findFirst({
-      where: {
-        id: jobId,
-        organizationId: org.id,
-        status: JobStatus.OPEN,
-      },
-    });
-
-    if (!job) {
-      throw new BadRequestException('Cannot ingest: job is not currently open');
+    if (!org.jobs || org.jobs.length === 0) {
+      throw new BadRequestException('Organization has no currently open jobs');
     }
 
-    const effectiveSource = (dto.source || dto.utmSource || 'JOB_BOARD_WEBHOOK').toUpperCase().trim();
+    const raw = (dto || {}) as Record<string, any>;
+
+    // 1. Normalize Email
+    const email = (
+      raw.email ||
+      raw['Email'] ||
+      raw['Email Address'] ||
+      raw['email address'] ||
+      raw['emailAddress'] ||
+      raw['candidateEmail'] ||
+      ''
+    ).trim().toLowerCase();
+
+    if (!email) {
+      throw new BadRequestException('A valid email address is required');
+    }
+
+    // 2. Normalize First and Last Name
+    let firstName = (raw.firstName || raw['First Name'] || raw['first_name'] || '').trim();
+    let lastName = (raw.lastName || raw['Last Name'] || raw['last_name'] || '').trim();
+
+    if (!firstName) {
+      const combinedName = (
+        raw.name ||
+        raw['Name'] ||
+        raw['Full Name'] ||
+        raw['full_name'] ||
+        raw['Candidate Name'] ||
+        raw['candidateName'] ||
+        ''
+      ).trim();
+
+      if (combinedName) {
+        const parts = combinedName.split(/\s+/);
+        firstName = parts[0];
+        lastName = parts.slice(1).join(' ');
+      } else {
+        firstName = email.split('@')[0].replace(/[._-]/g, ' ');
+      }
+    }
+
+    // 3. Normalize Phone
+    const phone = (
+      raw.phone ||
+      raw['Phone'] ||
+      raw['Phone number'] ||
+      raw['Phone Number'] ||
+      raw['phone number'] ||
+      raw['phoneNumber'] ||
+      raw['Mobile'] ||
+      raw['Mobile Number'] ||
+      raw['Contact'] ||
+      raw['Contact Number'] ||
+      ''
+    ).toString().trim() || undefined;
+
+    // 4. Normalize Resume URL
+    const resumeUrl = (
+      raw.resumeUrl ||
+      raw['Submit your cover letter or resume (pdf/word)'] ||
+      raw['Submit your cover letter or resume'] ||
+      raw['Submit your resume (pdf/word)'] ||
+      raw['Submit your resume'] ||
+      raw['Resume'] ||
+      raw['resume'] ||
+      raw['CV'] ||
+      raw['cv'] ||
+      raw['File'] ||
+      raw['Resume Link'] ||
+      raw['resumeLink'] ||
+      raw['Google Drive Link'] ||
+      ''
+    ).toString().trim() || undefined;
+
+    // 5. Extract desired position(s) specified in incoming form data
+    const candidatePositionPhrases: string[] = [];
+    const rawPositions = [
+      raw.position,
+      raw['Which position(s) are you interested in?'],
+      raw['Which position are you interested in?'],
+      raw['Which position(s) are you interested in'],
+      raw['Which position are you interested in'],
+      raw['Role'],
+      raw['role'],
+      raw.jobTitle,
+      raw['jobTitle'],
+      raw['Position'],
+    ].filter(Boolean);
+
+    for (const pItem of rawPositions) {
+      if (Array.isArray(pItem)) {
+        candidatePositionPhrases.push(...pItem.map(String));
+      } else if (typeof pItem === 'string') {
+        const parts = pItem.split(/[,;/|\n]+/).map((p: string) => p.trim()).filter(Boolean);
+        candidatePositionPhrases.push(...parts);
+      }
+    }
+
+    const coverLetter = (
+      raw.coverLetter ||
+      raw['Cover Letter'] ||
+      raw['cover_letter'] ||
+      raw['Why should we hire you?'] ||
+      raw['Note'] ||
+      ''
+    ).toString().trim() || undefined;
+
+    if (coverLetter) {
+      // Check patterns like "Interested Position from Form: Content Creator, Business Executive"
+      const match = coverLetter.match(
+        /(?:interested position(?: from form)?|position applied(?: for)?|target role|role|position)\s*[:\-]\s*([^\n\r]+)/i,
+      );
+      if (match && match[1]) {
+        const parts = match[1]
+          .split(/[,;/|]+/)
+          .map((p: string) => p.trim())
+          .filter(Boolean);
+        candidatePositionPhrases.push(...parts);
+      }
+    }
+
+    // Match candidate position phrases against open jobs in this org
+    const matchedJobs: typeof org.jobs = [];
+
+    const matchJob = (phrase: string) => {
+      const p = phrase.toLowerCase().trim();
+      if (!p) return null;
+
+      // 1. Exact match
+      let j = org.jobs.find((x) => x.title.toLowerCase().trim() === p);
+      if (j) return j;
+
+      // 2. Substring / contains
+      j = org.jobs.find(
+        (x) =>
+          x.title.toLowerCase().includes(p) || p.includes(x.title.toLowerCase()),
+      );
+      if (j) return j;
+
+      // 3. Word overlap (e.g. "Business Executive" matches "Business Development Executive", "SEO" matches "SEO Executive")
+      const pWords = p
+        .replace(/[^a-z0-9\s]/g, '')
+        .split(/\s+/)
+        .filter((w) => w.length >= 2);
+      let bestMatch: any = null;
+      let maxOverlap = 0;
+      for (const candidateJob of org.jobs) {
+        const jobWords = candidateJob.title
+          .toLowerCase()
+          .replace(/[^a-z0-9\s]/g, '')
+          .split(/\s+/)
+          .filter((w) => w.length >= 2);
+        const overlap = pWords.filter((w) => jobWords.includes(w)).length;
+        if (overlap > maxOverlap && overlap >= 1) {
+          maxOverlap = overlap;
+          bestMatch = candidateJob;
+        }
+      }
+      return bestMatch;
+    };
+
+    for (const phrase of candidatePositionPhrases) {
+      const found = matchJob(phrase);
+      if (found && !matchedJobs.some((x) => x.id === found.id)) {
+        matchedJobs.push(found);
+      }
+    }
+
+    // Also scan coverLetter directly if no phrases matched yet
+    if (matchedJobs.length === 0 && coverLetter) {
+      for (const openJob of org.jobs) {
+        if (coverLetter.toLowerCase().includes(openJob.title.toLowerCase())) {
+          matchedJobs.push(openJob);
+        }
+      }
+    }
+
+    // If explicit raw.jobId passed
+    if (matchedJobs.length === 0 && raw.jobId) {
+      const explicitJob = org.jobs.find((x) => x.id === raw.jobId);
+      if (explicitJob) matchedJobs.push(explicitJob);
+    }
+
+    // Fallback: If still nothing matched, and URL route jobId was passed and valid:
+    if (matchedJobs.length === 0 && jobId) {
+      const urlJob = org.jobs.find((x) => x.id === jobId);
+      if (urlJob) matchedJobs.push(urlJob);
+    }
+
+    // Ultimate fallback: First open job if nothing matched
+    if (matchedJobs.length === 0) {
+      matchedJobs.push(org.jobs[0]);
+    }
+
+    const effectiveSource = (raw.source || raw.utmSource || 'GOOGLE_FORM')
+      .toUpperCase()
+      .trim();
 
     // 1. Find or create candidate record
     const candidate = await this.candidatesService.findOrCreate(org.id, {
-      firstName: dto.firstName,
-      lastName: dto.lastName,
-      email: dto.email,
-      phone: dto.phone,
-      currentCompany: dto.currentCompany,
-      currentTitle: dto.currentTitle,
-      location: dto.location,
-      linkedinUrl: dto.linkedinUrl,
-      portfolioUrl: dto.portfolioUrl,
-      githubUrl: dto.githubUrl,
-      skills: dto.skills || [],
+      firstName,
+      lastName,
+      email,
+      phone,
+      currentCompany: raw.currentCompany,
+      currentTitle: raw.currentTitle,
+      location: raw.location,
+      linkedinUrl: raw.linkedinUrl,
+      portfolioUrl: raw.portfolioUrl,
+      githubUrl: raw.githubUrl,
+      skills: Array.isArray(raw.skills) ? raw.skills : [],
       source: effectiveSource,
-      resumeUrl: dto.resumeUrl,
+      resumeUrl,
     });
 
-    // 2. Submit application
-    const application = await this.applicationsService.create(org.id, {
-      jobId: job.id,
-      candidateId: candidate.id,
-      coverLetter: dto.coverLetter,
-      source: effectiveSource,
-      utmSource: dto.utmSource,
-      utmMedium: dto.utmMedium,
-      utmCampaign: dto.utmCampaign,
-      metadata: {
-        ...(dto.resumeUrl ? { resumeUrl: dto.resumeUrl } : {}),
-        appliedVia: effectiveSource,
-        sourceChannel: effectiveSource,
-        ingestedVia: 'WEBHOOK_API',
-      },
-    });
+    // 2. Submit applications for all matched jobs (placing in first stage by default)
+    const applications = [];
+    for (const targetJob of matchedJobs) {
+      try {
+        const app = await this.applicationsService.create(org.id, {
+          jobId: targetJob.id,
+          candidateId: candidate.id,
+          coverLetter: dto.coverLetter,
+          source: effectiveSource,
+          utmSource: dto.utmSource,
+          utmMedium: dto.utmMedium,
+          utmCampaign: dto.utmCampaign,
+          metadata: {
+            ...(dto.resumeUrl ? { resumeUrl: dto.resumeUrl } : {}),
+            appliedVia: effectiveSource,
+            sourceChannel: effectiveSource,
+            ingestedVia: 'WEBHOOK_API',
+          },
+        });
+        applications.push(app);
+      } catch (appErr: any) {
+        // Skip conflict if application already exists for this job
+      }
+    }
 
+    const primaryJob = matchedJobs[0];
     return {
-      message: 'Candidate ingested successfully',
-      applicationId: application.id,
+      message: `Candidate ingested successfully into ${matchedJobs.map((j) => j.title).join(', ')}`,
+      applicationId: applications[0]?.id || null,
       candidateId: candidate.id,
-      jobTitle: job.title,
+      jobTitle: matchedJobs.map((j) => j.title).join(', '),
       source: effectiveSource,
+      matchedJobs: matchedJobs.map((j) => ({ id: j.id, title: j.title })),
     };
   }
 }

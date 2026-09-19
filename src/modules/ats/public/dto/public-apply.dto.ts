@@ -13,8 +13,8 @@ export class PublicApplyJobDto {
   firstName: string;
 
   @IsString()
-  @IsNotEmpty()
-  lastName: string;
+  @IsOptional()
+  lastName?: string;
 
   @IsEmail()
   @IsNotEmpty()
@@ -23,6 +23,26 @@ export class PublicApplyJobDto {
   @IsString()
   @IsOptional()
   phone?: string;
+
+  @IsString()
+  @IsOptional()
+  jobTitle?: string;
+
+  @IsString()
+  @IsOptional()
+  position?: string;
+
+  @IsString()
+  @IsOptional()
+  role?: string;
+
+  @IsString()
+  @IsOptional()
+  jobId?: string;
+
+  @IsString()
+  @IsOptional()
+  resumeUrl?: string;
 
   @IsString()
   @IsOptional()

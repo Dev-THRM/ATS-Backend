@@ -352,8 +352,19 @@ export class ResumesService {
               this.logger.log(`Inline scoring: Fetching Google Drive file natively: ${driveId}`);
               const res = await fetch(`https://drive.google.com/uc?export=download&id=${driveId}`);
               if (res.ok) {
+                const contentType = res.headers.get('content-type') || '';
+                if (contentType.includes('text/html')) {
+                  this.logger.warn(`Google Drive link returned HTML page (private or sign-in required): ${driveId}`);
+                  return;
+                }
                 const arrayBuf = await res.arrayBuffer();
-                fileBuffer = Buffer.from(arrayBuf);
+                const buf = Buffer.from(arrayBuf);
+                const head = buf.slice(0, 300).toString('utf-8').toLowerCase();
+                if (head.includes('<!doctype html') || head.includes('<html') || head.includes('accounts.google.com')) {
+                  this.logger.warn(`Google Drive link returned HTML web page: ${driveId}`);
+                  return;
+                }
+                fileBuffer = buf;
               } else {
                 throw new Error(`Google Drive download failed with status ${res.status}`);
               }
@@ -431,14 +442,27 @@ export class ResumesService {
             flaggedSections: geminiResult.flaggedSections,
             reason: geminiResult.aiDetectionReason,
           };
-          parsedSkills = geminiResult.skills || [];
+          let extractedSkills: string[] = [];
+          if (Array.isArray(geminiResult.skills)) {
+            extractedSkills = geminiResult.skills.map((s) => String(s));
+          } else if (geminiResult.skills && typeof geminiResult.skills === 'object') {
+            extractedSkills = Object.values(geminiResult.skills)
+              .flat()
+              .map((s) => String(s));
+          }
+          parsedSkills = extractedSkills;
           atsScore = geminiResult.atsScore || 0;
           candidateExtracted = geminiResult.candidateInfo || {};
+          if ((geminiResult.candidateInfo as any)?.name && !candidateExtracted.firstName) {
+            const parts = String((geminiResult.candidateInfo as any).name).trim().split(/\s+/);
+            candidateExtracted.firstName = parts[0];
+            candidateExtracted.lastName = parts.slice(1).join(' ') || undefined;
+          }
           atsScoreBreakdown = {
             score: atsScore,
-            matchedSkills: geminiResult.matchedSkills,
-            missingSkills: geminiResult.missingSkills,
-            breakdown: geminiResult.scoreBreakdown,
+            matchedSkills: Array.isArray(geminiResult.matchedSkills) ? geminiResult.matchedSkills : [],
+            missingSkills: Array.isArray(geminiResult.missingSkills) ? geminiResult.missingSkills : [],
+            breakdown: geminiResult.scoreBreakdown || {},
           };
         }
       }

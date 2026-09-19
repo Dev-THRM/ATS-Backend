@@ -13,8 +13,8 @@ export class CreateCandidateDto {
   firstName: string;
 
   @IsString()
-  @IsNotEmpty()
-  lastName: string;
+  @IsOptional()
+  lastName?: string;
 
   @IsEmail()
   @IsNotEmpty()
@@ -23,6 +23,24 @@ export class CreateCandidateDto {
   @IsString()
   @IsOptional()
   phone?: string;
+
+  @IsString()
+  @IsOptional()
+  jobId?: string;
+
+  @IsArray()
+  @IsString({ each: true })
+  @IsOptional()
+  jobIds?: string[];
+
+  @IsArray()
+  @IsString({ each: true })
+  @IsOptional()
+  positions?: string[];
+
+  @IsString()
+  @IsOptional()
+  coverLetter?: string;
 
   @IsString()
   @IsOptional()

@@ -185,7 +185,8 @@ export class StorageService {
     }
 
     // Local fallback: read from disk
-    const targetPath = path.join(this.localStorageDir, key);
+    const cleanKey = key.replace(/^\/?storage\//, '').replace(/^\\?storage\\/, '').replace(/^[/\\]+/, '');
+    const targetPath = path.join(this.localStorageDir, cleanKey);
     return fs.readFile(targetPath);
   }
 

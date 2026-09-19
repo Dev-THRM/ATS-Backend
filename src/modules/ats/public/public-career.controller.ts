@@ -158,11 +158,32 @@ export class PublicCareerController {
   }
 
   /**
+   * Public Webhook/API endpoint for headless candidate ingestion from Google Forms / third-party boards
+   * without requiring hardcoded jobId.
+   */
+  @Post(':orgSlug/ingest')
+  @Throttle({ default: { limit: 60, ttl: 60000 } })
+  @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({
+    summary: 'Direct candidate ingestion from Google Forms / external boards',
+    description: 'Ingests applications programmatically and matches the candidate to the correct open job role automatically.',
+  })
+  @ApiParam({ name: 'orgSlug', description: 'Organization vanity slug' })
+  @ApiResponse({ status: 201, description: 'Candidate ingested and routed to matching job pipeline.' })
+  @ApiResponse({ status: 429, description: 'Rate limit exceeded.' })
+  async ingestCandidateDirect(
+    @Param('orgSlug') orgSlug: string,
+    @Body() dto: Record<string, any>,
+  ) {
+    return this.publicCareerService.ingestCandidate(orgSlug, undefined, dto);
+  }
+
+  /**
    * Public Webhook/API endpoint for headless candidate ingestion from third-party boards
    * (e.g. LinkedIn Easy Apply, Naukri, Glassdoor, Unstop, Indeed API).
    */
   @Post(':orgSlug/:jobId/ingest')
-  @Throttle({ default: { limit: 30, ttl: 60000 } })
+  @Throttle({ default: { limit: 60, ttl: 60000 } })
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({
     summary: 'Headless candidate ingestion from job portals',
@@ -175,7 +196,7 @@ export class PublicCareerController {
   async ingestCandidate(
     @Param('orgSlug') orgSlug: string,
     @Param('jobId') jobId: string,
-    @Body() dto: PublicApplyJobDto & { resumeUrl?: string },
+    @Body() dto: Record<string, any>,
   ) {
     return this.publicCareerService.ingestCandidate(orgSlug, jobId, dto);
   }

@@ -68,20 +68,27 @@ export class GeminiParserService {
       return null;
     }
 
-    try {
-      const modelName =
-        process.env.GEMINI_MODEL || this.config.get<string>('GEMINI_MODEL') || 'gemini-1.5-flash';
-      const model = this.genAI.getGenerativeModel({
-        model: modelName,
-        generationConfig: {
-          responseMimeType: 'application/json',
-          temperature: 0.1, // low temperature for precise, deterministic analysis
-        },
-      });
+    const candidateModels = [
+      process.env.GEMINI_MODEL || this.config.get<string>('GEMINI_MODEL') || 'gemini-3.6-flash',
+      'gemini-3.5-flash',
+      'gemini-flash-latest',
+      'gemini-3.5-flash-lite',
+    ].filter(Boolean);
 
-      const prompt = `
+    for (const modelName of candidateModels) {
+      try {
+        const model = this.genAI.getGenerativeModel({
+          model: modelName,
+          generationConfig: {
+            responseMimeType: 'application/json',
+            temperature: 0.1,
+          },
+        });
+
+        const prompt = `
 You are an expert ATS (Applicant Tracking System) Recruiter and AI Content Forensic Analyst.
 Analyze the following candidate resume against the provided Job Description.
+This system processes candidates across all industries (Tech, Sales, Digital Marketing, Content Creation, Video Editing, Operations, Finance, etc.).
 
 --- TARGET JOB DETAILS ---
 Title: ${job.title}
@@ -97,16 +104,21 @@ ${resumeText}
    - Carefully inspect every section (Professional Summary/Bio, Project Descriptions, Work Experience Bullet Points).
    - Determine if the resume content was generated or assisted by AI (ChatGPT, Claude, etc.) using linguistic markers, unnatural buzzword clustering, low burstiness, prompt residues (e.g. "As an AI...", "[Insert Company]"), or formulaic templates.
    - If AI-written content is detected in Bio, Projects, or Experience, mark isAiGenerated = true and provide high confidence (60-100) and specific reasons.
+   - If the resume is authentic, human-written or standard template, mark isAiGenerated = false with low confidence (0-20).
 
 2. CANDIDATE DETAILS EXTRACTION:
-   - Extract First Name, Last Name, Email, Phone, Location, LinkedIn URL, GitHub URL.
-   - Extract technical & professional skills.
-   - Calculate total years of professional experience.
+   - Extract First Name, Last Name, Email, Phone, Location, LinkedIn URL, GitHub URL / Portfolio URL.
+   - Extract relevant skills, competencies, and tools matching the candidate's field (e.g. Sales Outreach, Client Communication, Canva, Social Media, Reels, SEO, Python, etc.).
+   - Calculate total years of professional experience (0 for freshers/students).
    - Extract education degrees.
 
 3. ATS MATCH SCORING (0 to 100):
-   - Calculate an objective ATS match score based on skill match (50%), title & keyword relevance (30%), and experience alignment (20%).
-   - List matched skills and missing skills.
+   - Evaluate whether the candidate is a strong fit for this specific job:
+     * Skills Match (45% weight): Compare candidate's skills and tools against what the role actually requires.
+     * Title & Role Relevance (35% weight): How well the candidate's background, education, and career objectives align with this role and domain.
+     * Experience Alignment (20% weight): For entry-level/internship roles, freshers or relevant interns should receive high or full experience points.
+   - Calculate an objective, fair overall atsScore from 0 to 100.
+   - List matched skills and missing/recommended skills.
 
 Return ONLY a JSON object with this exact structure:
 {
@@ -137,12 +149,17 @@ Return ONLY a JSON object with this exact structure:
 }
 `;
 
-      const result = await model.generateContent(prompt);
-      const responseText = result.response.text();
-      return JSON.parse(responseText) as GeminiAnalysisResult;
-    } catch (error: any) {
-      this.logger.error(`Gemini Flash analysis failed: ${error.message}. Falling back to local engine.`);
-      return null;
+        const result = await model.generateContent(prompt);
+        const responseText = result.response.text();
+        const parsed = JSON.parse(responseText) as GeminiAnalysisResult;
+        this.logger.log(`Gemini analysis succeeded using model: ${modelName}`);
+        return parsed;
+      } catch (error: any) {
+        this.logger.warn(`Gemini model '${modelName}' attempt failed: ${error.message}. Trying next fallback model.`);
+      }
     }
+
+    this.logger.error('All Gemini Flash candidate models failed. Falling back to local deterministic engine.');
+    return null;
   }
 }
