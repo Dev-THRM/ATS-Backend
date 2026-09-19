@@ -30,7 +30,7 @@ export class EmailService {
     const host = process.env.SMTP_HOST || 'smtp.gmail.com';
     const port = Number(process.env.SMTP_PORT) || 465;
     const secure = process.env.SMTP_SECURE !== 'false' && port === 465;
-    const user = process.env.SMTP_USER || 'dev@thrmdgitalmarketing.in';
+    const user = process.env.SMTP_USER || 'dev@thrmdigitalmarketing.in';
     const pass = (process.env.SMTP_PASS || '').trim();
 
     if (pass) {
@@ -68,7 +68,7 @@ export class EmailService {
     const from =
       options.from ||
       process.env.SMTP_FROM ||
-      `THRM Digital Marketing <${process.env.SMTP_USER || 'dev@thrmdgitalmarketing.in'}>`;
+      `THRM Digital Marketing <${process.env.SMTP_USER || 'dev@thrmdigitalmarketing.in'}>`;
 
     if (!options.to || !options.to.includes('@')) {
       this.logger.warn(`Invalid or missing recipient email address: "${options.to}"`);

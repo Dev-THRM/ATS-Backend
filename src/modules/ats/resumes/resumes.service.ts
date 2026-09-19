@@ -36,6 +36,8 @@ const ALLOWED_MIME_TYPES = [
 const ALLOWED_EXTENSIONS = ['.pdf', '.docx', '.doc'];
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
 
+import { CandidateNotificationWorker } from '../notifications/candidate-notification.worker.js';
+
 @Injectable()
 export class ResumesService {
   private readonly logger = new Logger(ResumesService.name);
@@ -47,6 +49,9 @@ export class ResumesService {
     @Inject(AiDetectorService) private readonly aiDetector: AiDetectorService,
     @Optional() @Inject(GeminiParserService) private readonly geminiParser?: GeminiParserService,
     @Optional() @InjectQueue(RESUME_QUEUE) private readonly resumeQueue?: Queue,
+    @Optional()
+    @Inject(CandidateNotificationWorker)
+    private readonly notificationWorker?: CandidateNotificationWorker,
   ) {}
 
   /**
@@ -513,6 +518,18 @@ export class ResumesService {
         ) as Prisma.InputJsonValue;
 
         try {
+          const appRecord = await this.prisma.application.findUnique({
+            where: { id: applicationId },
+            include: {
+              candidate: true,
+              job: {
+                include: {
+                  organization: true,
+                },
+              },
+            },
+          });
+
           await this.prisma.application.update({
             where: { id: applicationId },
             data: {
@@ -522,6 +539,25 @@ export class ResumesService {
               metadata: updatedMeta,
             },
           });
+
+          if (this.notificationWorker && appRecord) {
+            void this.notificationWorker
+              .dispatchCandidateStatusUpdate({
+                applicationId: applicationId || appRecord.id,
+                candidateId: appRecord.candidateId,
+                candidateName: `${appRecord.candidate.firstName} ${appRecord.candidate.lastName}`.trim(),
+                candidatePhone: appRecord.candidate.phone,
+                candidateEmail: appRecord.candidate.email,
+                jobId: appRecord.jobId,
+                jobTitle: appRecord.job?.title || 'Applied Position',
+                companyName: appRecord.job?.organization?.name || 'THRM Digital Marketing Agency',
+                stageName: 'Rejected',
+                rejectionReason,
+              })
+              .catch((err) =>
+                this.logger.error(`Failed to dispatch auto-rejection notification: ${err.message}`),
+              );
+          }
         } catch {
           this.logger.warn(`Inline scoring: application ${applicationId} not found during auto-reject`);
         }

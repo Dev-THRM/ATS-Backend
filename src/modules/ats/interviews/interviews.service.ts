@@ -17,6 +17,8 @@ import { UpdateInterviewDto } from './dto/update-interview.dto.js';
 import { QueryInterviewsDto } from './dto/query-interviews.dto.js';
 import { SubmitInterviewFeedbackDto } from './dto/submit-feedback.dto.js';
 
+import { CandidateNotificationWorker } from '../notifications/candidate-notification.worker.js';
+
 @Injectable()
 export class InterviewsService {
   private readonly logger = new Logger(InterviewsService.name);
@@ -27,6 +29,9 @@ export class InterviewsService {
     @Optional()
     @InjectQueue(NOTIFICATION_QUEUE)
     private readonly notificationQueue?: Queue,
+    @Optional()
+    @Inject(CandidateNotificationWorker)
+    private readonly notificationWorker?: CandidateNotificationWorker,
   ) {}
 
   /**
@@ -107,25 +112,35 @@ export class InterviewsService {
       },
     });
 
-    // 4. Enqueue Immediate WhatsApp Invitation Notification to candidate
-    if (this.notificationQueue) {
-      await this.notificationQueue.add('send-interview-invite', {
-        interviewId: interview.id,
-        applicationId: application.id,
-        candidateId: application.candidateId,
-        candidateName: `${application.candidate.firstName} ${application.candidate.lastName}`,
-        candidatePhone: application.candidate.phone,
-        candidateEmail: application.candidate.email,
-        jobTitle: application.job.title,
-        companyName: application.job.organization?.name || 'Our Company',
-        interviewTitle: dto.title,
-        scheduledAt: scheduledDate,
-        durationMinutes: dto.durationMinutes || 45,
-        meetingLink,
-        type: 'INVITE',
-      });
+    // 4. Dispatch Immediate WhatsApp Invitation Notification to candidate
+    const invitePayload = {
+      interviewId: interview.id,
+      applicationId: application.id,
+      candidateId: application.candidateId,
+      candidateName: `${application.candidate.firstName} ${application.candidate.lastName}`.trim(),
+      candidatePhone: application.candidate.phone,
+      candidateEmail: application.candidate.email,
+      jobTitle: application.job.title,
+      companyName: application.job.organization?.name || 'Our Company',
+      interviewTitle: dto.title,
+      scheduledAt: scheduledDate,
+      durationMinutes: dto.durationMinutes || 45,
+      meetingLink,
+      type: 'INVITE' as const,
+    };
 
-      // 5. Schedule 1-Day Pre-Interview Reminder (Delayed Job for 24h prior)
+    if (this.notificationWorker) {
+      void this.notificationWorker
+        .dispatchInterviewNotification(invitePayload)
+        .catch((err) => this.logger.error(`Interview invite dispatch error: ${err.message}`));
+    } else if (this.notificationQueue) {
+      await this.notificationQueue.add('send-interview-invite', invitePayload).catch((err) => {
+        this.logger.warn(`Queue dispatch failed: ${err.message}`);
+      });
+    }
+
+    // 5. Schedule 1-Day Pre-Interview Reminder (Delayed Job for 24h prior)
+    if (this.notificationQueue) {
       const nowMs = Date.now();
       const scheduledMs = scheduledDate.getTime();
       const oneDayMs = 24 * 60 * 60 * 1000;
@@ -157,7 +172,7 @@ export class InterviewsService {
             delay: delayMs,
             jobId: `interview-reminder-${interview.id}`,
           },
-        );
+        ).catch((err) => this.logger.warn(`Failed to schedule reminder: ${err.message}`));
       }
     }
 

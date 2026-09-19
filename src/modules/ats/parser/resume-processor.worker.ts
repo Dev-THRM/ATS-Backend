@@ -8,6 +8,7 @@ import { StageTransitionService } from '../../shared/pipelines/stage-transition.
 import { ResumeParserService } from './resume-parser.service.js';
 import { AiDetectorService } from './ai-detector.service.js';
 import { GeminiParserService } from './gemini-parser.service.js';
+import { CandidateNotificationWorker } from '../notifications/candidate-notification.worker.js';
 import { Prisma, ApplicationStatus, EntityPipelineType } from '@prisma/client';
 
 export interface ProcessResumeJobData {
@@ -35,6 +36,9 @@ export class ResumeProcessorWorker extends WorkerHost {
     @Optional()
     @Inject(GeminiParserService)
     private readonly geminiParser?: GeminiParserService,
+    @Optional()
+    @Inject(CandidateNotificationWorker)
+    private readonly notificationWorker?: CandidateNotificationWorker,
   ) {
     super();
   }
@@ -113,11 +117,13 @@ export class ResumeProcessorWorker extends WorkerHost {
         application = await this.prisma.application.findFirst({
           where: { id: applicationId },
           include: {
+            candidate: true,
             job: {
               include: {
                 pipelineStages: {
                   orderBy: { order: 'asc' },
                 },
+                organization: true,
               },
             },
             currentStage: true,
@@ -256,6 +262,26 @@ export class ResumeProcessorWorker extends WorkerHost {
           reason: rejectionReason,
           notes: `Auto-rejected by ATS AI Guard (Confidence: ${aiConfidence}%)`,
         });
+
+        if (this.notificationWorker && application?.candidate) {
+          const cand = application.candidate;
+          void this.notificationWorker
+            .dispatchCandidateStatusUpdate({
+              applicationId: applicationId!,
+              candidateId: cand.id,
+              candidateName: `${cand.firstName} ${cand.lastName}`.trim(),
+              candidatePhone: cand.phone,
+              candidateEmail: cand.email,
+              jobId: application.jobId,
+              jobTitle: targetJob?.title || 'Applied Position',
+              companyName: (targetJob as any)?.organization?.name || 'THRM Digital Marketing Agency',
+              stageName: 'Rejected',
+              rejectionReason,
+            })
+            .catch((err) =>
+              this.logger.error(`Failed to dispatch auto-rejection notification: ${err.message}`),
+            );
+        }
 
         return {
           success: true,

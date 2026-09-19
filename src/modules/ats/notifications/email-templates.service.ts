@@ -25,25 +25,40 @@ export class EmailTemplatesService {
     const normalizedStage = stageName.trim().toLowerCase();
 
     // 1. Rejection / Fails HR round
-    if (normalizedStage.includes('reject') || Boolean(rejectionReason)) {
+    if (
+      normalizedStage.includes('reject') ||
+      normalizedStage.includes('fail') ||
+      normalizedStage.includes('declined') ||
+      Boolean(rejectionReason)
+    ) {
       return this.renderRejectionEmail(params);
     }
 
-    // 2. Cleared HR round / Offer extended
+    // 2. Cleared HR round / Offer extended / Hired
     if (
       normalizedStage.includes('offer') ||
       normalizedStage.includes('hired') ||
-      normalizedStage.includes('selected')
+      normalizedStage.includes('selected') ||
+      normalizedStage.includes('cleared') ||
+      normalizedStage.includes('clears') ||
+      normalizedStage.includes('passed')
     ) {
       return this.renderOfferEmail(params);
     }
 
-    // 3. Application Submission confirmation
-    if (normalizedStage.includes('applied') || normalizedStage.includes('application')) {
+    // 3. Application Submission confirmation (applied, candidate created, talent pool)
+    if (
+      normalizedStage.includes('applied') ||
+      normalizedStage.includes('application') ||
+      normalizedStage.includes('new') ||
+      normalizedStage.includes('sourced') ||
+      normalizedStage.includes('review') ||
+      normalizedStage.includes('talent')
+    ) {
       return this.renderApplicationReceivedEmail(params);
     }
 
-    // 4. Default interview / stage progression
+    // 4. Default interview / stage progression (e.g. HR Round, Technical Round, Final Interview)
     return this.renderStageProgressEmail(params);
   }
 

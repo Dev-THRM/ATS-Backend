@@ -1,6 +1,6 @@
-import { Processor, WorkerHost } from '@nestjs/bullmq';
+import { Processor, WorkerHost, InjectQueue } from '@nestjs/bullmq';
 import { Logger, Inject, Optional } from '@nestjs/common';
-import { Job } from 'bullmq';
+import { Job, Queue } from 'bullmq';
 import { NOTIFICATION_QUEUE } from '../../shared/queue/queue.module.js';
 import { PrismaService } from '../../shared/prisma/prisma.service.js';
 import { WhatsAppTemplatesService } from './whatsapp-templates.service.js';
@@ -57,6 +57,9 @@ export class CandidateNotificationWorker extends WorkerHost {
     @Optional()
     @Inject(EmailTemplatesService)
     emailTemplatesService?: EmailTemplatesService,
+    @Optional()
+    @InjectQueue(NOTIFICATION_QUEUE)
+    private readonly notificationQueue?: Queue,
   ) {
     super();
     this.emailService = emailService || new EmailService();
@@ -76,11 +79,66 @@ export class CandidateNotificationWorker extends WorkerHost {
   }
 
   /**
+   * Dispatches candidate status notifications with automatic inline execution fallback.
+   * Tries BullMQ first (if queue is healthy). If BullMQ fails or Redis is unavailable/rate-limited,
+   * runs immediately via inline execution (Google SMTP + Prisma audit logging).
+   */
+  async dispatchCandidateStatusUpdate(
+    data: CandidateStatusUpdateJobData,
+  ): Promise<any> {
+    // 1. Try enqueuing to BullMQ if queue is injected
+    if (this.notificationQueue) {
+      try {
+        const job = await this.notificationQueue.add('send-candidate-status-update', data);
+        this.logger.log(`Candidate status update enqueued via BullMQ (Job ${job.id})`);
+        return { enqueued: true, jobId: job.id };
+      } catch (queueErr: any) {
+        this.logger.warn(
+          `BullMQ queue unavailable for candidate status update (${queueErr.message}). Executing immediate inline dispatch via Google SMTP.`,
+        );
+      }
+    }
+
+    // 2. Direct inline execution fallback
+    return this.processCandidateStatusUpdate(data);
+  }
+
+  /**
+   * Dispatches interview notifications with automatic inline fallback.
+   */
+  async dispatchInterviewNotification(
+    data: InterviewNotificationJobData,
+  ): Promise<any> {
+    if (this.notificationQueue) {
+      try {
+        const job = await this.notificationQueue.add(
+          data.type === 'REMINDER' ? 'send-interview-reminder' : 'send-interview-invite',
+          data,
+        );
+        this.logger.log(`Interview notification enqueued via BullMQ (Job ${job.id})`);
+        return { enqueued: true, jobId: job.id };
+      } catch (queueErr: any) {
+        this.logger.warn(
+          `BullMQ queue unavailable for interview notification (${queueErr.message}). Executing immediate inline dispatch.`,
+        );
+      }
+    }
+
+    // Direct inline fallback
+    return this.processInterviewNotification(data);
+  }
+
+  /**
    * Processes routine stage move & status transition notifications.
    */
-  private async processCandidateStatusUpdate(
-    job: Job<CandidateStatusUpdateJobData>,
+  async processCandidateStatusUpdate(
+    jobOrData: Job<CandidateStatusUpdateJobData> | CandidateStatusUpdateJobData,
   ): Promise<any> {
+    const data: CandidateStatusUpdateJobData =
+      'data' in jobOrData && jobOrData.data
+        ? (jobOrData.data as CandidateStatusUpdateJobData)
+        : (jobOrData as CandidateStatusUpdateJobData);
+
     const {
       applicationId,
       candidateName,
@@ -91,7 +149,7 @@ export class CandidateNotificationWorker extends WorkerHost {
       stageName,
       rejectionReason,
       customNotes,
-    } = job.data;
+    } = data;
 
     const resolvedCompany = companyName || 'THRM Digital Marketing Agency';
 
@@ -265,9 +323,14 @@ export class CandidateNotificationWorker extends WorkerHost {
   /**
    * Processes Google Meet interview invitations & 1-day reminders via WhatsApp.
    */
-  private async processInterviewNotification(
-    job: Job<InterviewNotificationJobData>,
+  async processInterviewNotification(
+    jobOrData: Job<InterviewNotificationJobData> | InterviewNotificationJobData,
   ): Promise<any> {
+    const data: InterviewNotificationJobData =
+      'data' in jobOrData && jobOrData.data
+        ? (jobOrData.data as InterviewNotificationJobData)
+        : (jobOrData as InterviewNotificationJobData);
+
     const {
       interviewId,
       applicationId,
@@ -280,7 +343,7 @@ export class CandidateNotificationWorker extends WorkerHost {
       durationMinutes,
       meetingLink,
       type,
-    } = job.data;
+    } = data;
 
     this.logger.log(
       `Processing interview ${type} WhatsApp notification for candidate ${candidateName} (Interview: ${interviewId})`,

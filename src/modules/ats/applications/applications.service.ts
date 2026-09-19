@@ -20,6 +20,7 @@ import {
   RESUME_QUEUE,
   NOTIFICATION_QUEUE,
 } from '../../shared/queue/queue.module.js';
+import { CandidateNotificationWorker } from '../notifications/candidate-notification.worker.js';
 import { CreateApplicationDto } from './dto/create-application.dto.js';
 import { QueryApplicationsDto } from './dto/query-applications.dto.js';
 
@@ -41,6 +42,9 @@ export class ApplicationsService {
     @Optional()
     @InjectQueue(NOTIFICATION_QUEUE)
     private readonly notificationQueue?: Queue,
+    @Optional()
+    @Inject(CandidateNotificationWorker)
+    private readonly notificationWorker?: CandidateNotificationWorker,
   ) {}
 
   /**
@@ -203,21 +207,29 @@ export class ApplicationsService {
       });
     }
 
-    // Enqueue candidate application receipt notification
-    if (this.notificationQueue) {
-      const companyName =
-        (application.job as any)?.organization?.name || 'THRM Digital Marketing Agency';
-      await this.notificationQueue.add('send-candidate-status-update', {
-        applicationId: application.id,
-        candidateId,
-        candidateName: `${application.candidate.firstName} ${application.candidate.lastName}`,
-        candidatePhone: application.candidate.phone,
-        candidateEmail: application.candidate.email,
-        jobId: dto.jobId,
-        jobTitle: application.job.title,
-        companyName,
-        stageName: initialStageName,
-        fromStageName: null,
+    // Dispatch candidate application receipt notification
+    const companyName =
+      (application.job as any)?.organization?.name || 'THRM Digital Marketing Agency';
+    const notificationPayload = {
+      applicationId: application.id,
+      candidateId,
+      candidateName: `${application.candidate.firstName} ${application.candidate.lastName}`.trim(),
+      candidatePhone: application.candidate.phone,
+      candidateEmail: application.candidate.email,
+      jobId: dto.jobId,
+      jobTitle: application.job.title,
+      companyName,
+      stageName: initialStageName,
+      fromStageName: null,
+    };
+
+    if (this.notificationWorker) {
+      void this.notificationWorker
+        .dispatchCandidateStatusUpdate(notificationPayload)
+        .catch((err) => this.logger.error(`Status update dispatch error: ${err.message}`, err.stack));
+    } else if (this.notificationQueue) {
+      await this.notificationQueue.add('send-candidate-status-update', notificationPayload).catch((err) => {
+        this.logger.warn(`Queue dispatch failed: ${err.message}`);
       });
     }
 
@@ -491,22 +503,30 @@ export class ApplicationsService {
       reason: rejectionReason,
     });
 
-    // Enqueue candidate status transition notification
-    if (this.notificationQueue) {
-      const companyName =
-        (updated.job as any)?.organization?.name || 'THRM Digital Marketing Agency';
-      await this.notificationQueue.add('send-candidate-status-update', {
-        applicationId: updated.id,
-        candidateId: updated.candidateId,
-        candidateName: `${updated.candidate.firstName} ${updated.candidate.lastName}`,
-        candidatePhone: updated.candidate.phone,
-        candidateEmail: updated.candidate.email,
-        jobId: updated.jobId,
-        jobTitle: updated.job.title,
-        companyName,
-        stageName: targetStage.name,
-        fromStageName: application.currentStage.name,
-        rejectionReason,
+    // Dispatch candidate status transition notification
+    const companyName =
+      (updated.job as any)?.organization?.name || 'THRM Digital Marketing Agency';
+    const notificationPayload = {
+      applicationId: updated.id,
+      candidateId: updated.candidateId,
+      candidateName: `${updated.candidate.firstName} ${updated.candidate.lastName}`.trim(),
+      candidatePhone: updated.candidate.phone,
+      candidateEmail: updated.candidate.email,
+      jobId: updated.jobId,
+      jobTitle: updated.job.title,
+      companyName,
+      stageName: targetStage.name,
+      fromStageName: application.currentStage.name,
+      rejectionReason,
+    };
+
+    if (this.notificationWorker) {
+      void this.notificationWorker
+        .dispatchCandidateStatusUpdate(notificationPayload)
+        .catch((err) => this.logger.error(`Status update dispatch error: ${err.message}`, err.stack));
+    } else if (this.notificationQueue) {
+      await this.notificationQueue.add('send-candidate-status-update', notificationPayload).catch((err) => {
+        this.logger.warn(`Queue dispatch failed: ${err.message}`);
       });
     }
 
@@ -669,20 +689,29 @@ export class ApplicationsService {
       },
     });
 
-    if (this.notificationQueue) {
-      const companyName =
-        (updated.job as any)?.organization?.name || 'THRM Digital Marketing Agency';
-      await this.notificationQueue.add('send-candidate-status-update', {
-        applicationId: updated.id,
-        candidateId: updated.candidateId,
-        candidateName: `${updated.candidate.firstName} ${updated.candidate.lastName}`,
-        candidatePhone: updated.candidate.phone,
-        candidateEmail: updated.candidate.email,
-        jobId: updated.jobId,
-        jobTitle: updated.job.title,
-        companyName,
-        stageName: status,
-        rejectionReason,
+    // Dispatch candidate status transition notification
+    const companyName =
+      (updated.job as any)?.organization?.name || 'THRM Digital Marketing Agency';
+    const notificationPayload = {
+      applicationId: updated.id,
+      candidateId: updated.candidateId,
+      candidateName: `${updated.candidate.firstName} ${updated.candidate.lastName}`.trim(),
+      candidatePhone: updated.candidate.phone,
+      candidateEmail: updated.candidate.email,
+      jobId: updated.jobId,
+      jobTitle: updated.job.title,
+      companyName,
+      stageName: status,
+      rejectionReason,
+    };
+
+    if (this.notificationWorker) {
+      void this.notificationWorker
+        .dispatchCandidateStatusUpdate(notificationPayload)
+        .catch((err) => this.logger.error(`Status update dispatch error: ${err.message}`, err.stack));
+    } else if (this.notificationQueue) {
+      await this.notificationQueue.add('send-candidate-status-update', notificationPayload).catch((err) => {
+        this.logger.warn(`Queue dispatch failed: ${err.message}`);
       });
     }
 

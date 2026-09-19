@@ -4,6 +4,7 @@ import {
   ConflictException,
   Inject,
   Optional,
+  Logger,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../shared/prisma/prisma.service.js';
@@ -17,15 +18,21 @@ import { randomUUID } from 'node:crypto';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import { NOTIFICATION_QUEUE, RESUME_QUEUE } from '../../shared/queue/queue.module.js';
+import { CandidateNotificationWorker } from '../notifications/candidate-notification.worker.js';
 
 @Injectable()
 export class CandidatesService {
+  private readonly logger = new Logger(CandidatesService.name);
+
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Optional() @Inject(StorageService) private readonly storageService?: StorageService,
     @Optional() @Inject(ResumeParserService) private readonly resumeParser?: ResumeParserService,
     @Optional() @InjectQueue(NOTIFICATION_QUEUE) private readonly notificationQueue?: Queue,
     @Optional() @InjectQueue(RESUME_QUEUE) private readonly resumeQueue?: Queue,
+    @Optional()
+    @Inject(CandidateNotificationWorker)
+    private readonly notificationWorker?: CandidateNotificationWorker,
   ) {}
 
   /**
@@ -185,50 +192,68 @@ export class CandidatesService {
           });
         }
 
-        // Enqueue candidate application receipt notification
-        if (this.notificationQueue) {
-          const org = await this.prisma.organization.findUnique({
-            where: { id: organizationId },
-            select: { name: true },
-          });
-          const companyName = org?.name || 'THRM Digital Marketing Agency';
+        // Dispatch candidate application receipt notification
+        const org = await this.prisma.organization.findUnique({
+          where: { id: organizationId },
+          select: { name: true },
+        });
+        const companyName = org?.name || 'THRM Digital Marketing Agency';
 
-          await this.notificationQueue.add('send-candidate-status-update', {
-            applicationId: app.id,
-            candidateId: candidate.id,
-            candidateName: `${candidate.firstName} ${candidate.lastName}`.trim(),
-            candidatePhone: candidate.phone,
-            candidateEmail: candidate.email,
-            jobId: job.id,
-            jobTitle: job.title,
-            companyName,
-            stageName: app.currentStage?.name || 'Applied',
-            fromStageName: null,
+        const notificationPayload = {
+          applicationId: app.id,
+          candidateId: candidate.id,
+          candidateName: `${candidate.firstName} ${candidate.lastName}`.trim(),
+          candidatePhone: candidate.phone,
+          candidateEmail: candidate.email,
+          jobId: job.id,
+          jobTitle: job.title,
+          companyName,
+          stageName: app.currentStage?.name || 'Applied',
+          fromStageName: null,
+        };
+
+        if (this.notificationWorker) {
+          void this.notificationWorker
+            .dispatchCandidateStatusUpdate(notificationPayload)
+            .catch((err) => this.logger.error(`Notification dispatch error: ${err.message}`, err.stack));
+        } else if (this.notificationQueue) {
+          await this.notificationQueue.add('send-candidate-status-update', notificationPayload).catch((err) => {
+            this.logger.warn(`Queue dispatch failed: ${err.message}`);
           });
         }
       }
     }
 
     // If candidate was added directly to talent pool without any active job application
-    if (createdApplications.length === 0 && this.notificationQueue) {
+    if (createdApplications.length === 0) {
       const org = await this.prisma.organization.findUnique({
         where: { id: organizationId },
         select: { name: true },
       });
       const companyName = org?.name || 'THRM Digital Marketing Agency';
 
-      await this.notificationQueue.add('send-candidate-status-update', {
+      const talentPoolPayload = {
         applicationId: '',
         candidateId: candidate.id,
         candidateName: `${candidate.firstName} ${candidate.lastName}`.trim(),
         candidatePhone: candidate.phone,
         candidateEmail: candidate.email,
         jobId: '',
-        jobTitle: candidate.currentTitle || 'Applicant Profile',
+        jobTitle: candidate.currentTitle || 'General Talent Network',
         companyName,
         stageName: 'Applied',
         fromStageName: null,
-      });
+      };
+
+      if (this.notificationWorker) {
+        void this.notificationWorker
+          .dispatchCandidateStatusUpdate(talentPoolPayload)
+          .catch((err) => this.logger.error(`Notification dispatch error: ${err.message}`, err.stack));
+      } else if (this.notificationQueue) {
+        await this.notificationQueue.add('send-candidate-status-update', talentPoolPayload).catch((err) => {
+          this.logger.warn(`Queue dispatch failed: ${err.message}`);
+        });
+      }
     }
 
     return {
