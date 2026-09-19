@@ -5,8 +5,8 @@ import { StorageModule } from './storage/storage.module.js';
 import { QueueModule } from './queue/queue.module.js';
 
 @Module({
-  imports: [PrismaModule, StorageModule, QueueModule],
+  imports: [PrismaModule, StorageModule],
   providers: [StageTransitionService],
-  exports: [PrismaModule, StageTransitionService, StorageModule, QueueModule],
+  exports: [PrismaModule, StageTransitionService, StorageModule],
 })
 export class SharedModule {}

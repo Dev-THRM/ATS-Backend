@@ -42,7 +42,6 @@ import { PublicCareerService } from './public/public-career.service.js';
     AiDetectorService,
     GeminiParserService,
     ApplicationsService,
-    ResumeProcessorWorker,
     CalendarService,
     InterviewsService,
     AtsDashboardService,

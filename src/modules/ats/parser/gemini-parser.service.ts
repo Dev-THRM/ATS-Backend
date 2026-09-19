@@ -36,7 +36,7 @@ export class GeminiParserService {
   private readonly isEnabled: boolean = false;
 
   constructor(@Inject(ConfigService) private readonly config: ConfigService) {
-    const apiKey = this.config.get<string>('GEMINI_API_KEY');
+    const apiKey = process.env.GEMINI_API_KEY || this.config.get<string>('GEMINI_API_KEY');
     if (apiKey) {
       this.genAI = new GoogleGenerativeAI(apiKey);
       this.isEnabled = true;
@@ -70,7 +70,7 @@ export class GeminiParserService {
 
     try {
       const modelName =
-        this.config.get<string>('GEMINI_MODEL') || 'gemini-flash-lite-latest';
+        process.env.GEMINI_MODEL || this.config.get<string>('GEMINI_MODEL') || 'gemini-1.5-flash';
       const model = this.genAI.getGenerativeModel({
         model: modelName,
         generationConfig: {
