@@ -2,6 +2,8 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { ResumesService, UploadedResumeFile } from './resumes.service.js';
 import { StorageService } from '../../shared/storage/storage.service.js';
 import { PrismaService } from '../../shared/prisma/prisma.service.js';
+import { ResumeParserService } from '../parser/resume-parser.service.js';
+import { AiDetectorService } from '../parser/ai-detector.service.js';
 import { BadRequestException } from '@nestjs/common';
 
 describe('ResumesService', () => {
@@ -39,8 +41,19 @@ describe('ResumesService', () => {
       },
     } as unknown as PrismaService;
 
-    service = new ResumesService(storageService, prisma);
+    const mockResumeParser = {
+      extractTextFromBuffer: vi.fn().mockResolvedValue('mock resume text'),
+      parseResumeText: vi.fn().mockReturnValue({ skills: [], candidateInfo: {}, experienceYears: 0, education: [], rawText: '' }),
+      calculateAtsScore: vi.fn().mockReturnValue({ score: 0, matchedSkills: [], missingSkills: [], experienceMatchScore: 0, titleRelevanceScore: 0, breakdown: {} }),
+    } as unknown as ResumeParserService;
+
+    const mockAiDetector = {
+      detectAiContent: vi.fn().mockReturnValue({ isAiGenerated: false, overallConfidence: 0 }),
+    } as unknown as AiDetectorService;
+
+    service = new ResumesService(storageService, prisma, mockResumeParser, mockAiDetector);
   });
+
 
   it('should be defined', () => {
     expect(service).toBeDefined();

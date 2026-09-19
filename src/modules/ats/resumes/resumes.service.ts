@@ -4,6 +4,7 @@ import {
   NotFoundException,
   Inject,
   Optional,
+  Logger,
 } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
@@ -12,6 +13,10 @@ import { PrismaService } from '../../shared/prisma/prisma.service.js';
 import { RESUME_QUEUE } from '../../shared/queue/queue.module.js';
 import { GetPresignedUrlDto } from './dto/get-presigned-url.dto.js';
 import { AttachResumeDto } from './dto/attach-resume.dto.js';
+import { ResumeParserService } from '../parser/resume-parser.service.js';
+import { AiDetectorService } from '../parser/ai-detector.service.js';
+import { GeminiParserService } from '../parser/gemini-parser.service.js';
+import { Prisma, ApplicationStatus } from '@prisma/client';
 import * as path from 'node:path';
 import 'multer';
 
@@ -33,9 +38,14 @@ const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
 
 @Injectable()
 export class ResumesService {
+  private readonly logger = new Logger(ResumesService.name);
+
   constructor(
     @Inject(StorageService) private readonly storageService: StorageService,
     @Inject(PrismaService) private readonly prisma: PrismaService,
+    @Inject(ResumeParserService) private readonly resumeParser: ResumeParserService,
+    @Inject(AiDetectorService) private readonly aiDetector: AiDetectorService,
+    @Optional() @Inject(GeminiParserService) private readonly geminiParser?: GeminiParserService,
     @Optional() @InjectQueue(RESUME_QUEUE) private readonly resumeQueue?: Queue,
   ) {}
 
@@ -150,20 +160,43 @@ export class ResumesService {
       }
     }
 
-    // Enqueue background parsing job
+    // Enqueue background parsing job via Redis/BullMQ, or fall back to inline scoring
+    let queuedSuccessfully = false;
     if (this.resumeQueue) {
-      await this.resumeQueue.add('parse-resume', {
+      try {
+        await this.resumeQueue.add('parse-resume', {
+          organizationId,
+          candidateId,
+          jobId,
+          applicationId,
+          resumeKey: key,
+          resumeUrl: url,
+        });
+        queuedSuccessfully = true;
+        this.logger.log(`Resume parse job queued via BullMQ for key: ${key}`);
+      } catch (queueErr: any) {
+        this.logger.warn(
+          `BullMQ queue unavailable (${queueErr.message}). Running inline scoring fallback.`,
+        );
+      }
+    }
+
+    if (!queuedSuccessfully) {
+      this.logger.log(`Running inline ATS scoring fallback for key: ${key}`);
+      // Run asynchronously so the upload response is not blocked
+      this.runInlineScoring({
         organizationId,
-        candidateId,
-        jobId,
-        applicationId,
+        fileBuffer: file.buffer,
+        mimeType: file.mimetype,
         resumeKey: key,
         resumeUrl: url,
-      });
+        candidateId,
+        applicationId,
+      }).catch((err: any) => this.logger.error(`Inline scoring error: ${err.message}`, err.stack));
     }
 
     return {
-      message: 'Resume uploaded successfully and queued for AI parsing',
+      message: 'Resume uploaded successfully and processed for AI parsing',
       key,
       resumeUrl: url,
       fileName: file.originalname,
@@ -233,15 +266,41 @@ export class ResumesService {
       }
     }
 
-    // Enqueue parsing job if key is provided
-    if (dto.key && this.resumeQueue) {
-      await this.resumeQueue.add('parse-resume', {
-        organizationId,
-        candidateId: dto.candidateId,
-        applicationId: dto.applicationId,
-        resumeKey: dto.key,
-        resumeUrl: dto.resumeUrl,
-      });
+    // Enqueue parsing job if key is provided, or fall back to inline scoring
+    if (dto.key) {
+      let queuedSuccessfully = false;
+      if (this.resumeQueue) {
+        try {
+          await this.resumeQueue.add('parse-resume', {
+            organizationId,
+            candidateId: dto.candidateId,
+            applicationId: dto.applicationId,
+            resumeKey: dto.key,
+            resumeUrl: dto.resumeUrl,
+          });
+          queuedSuccessfully = true;
+        } catch (queueErr: any) {
+          this.logger.warn(
+            `BullMQ queue unavailable on attachResume (${queueErr.message}). Running inline scoring fallback.`,
+          );
+        }
+      }
+
+      if (!queuedSuccessfully) {
+        this.storageService
+          .getFileBuffer(dto.key)
+          .then((fileBuffer) =>
+            this.runInlineScoring({
+              organizationId,
+              fileBuffer,
+              resumeKey: dto.key!,
+              resumeUrl: dto.resumeUrl,
+              candidateId: dto.candidateId,
+              applicationId: dto.applicationId,
+            }),
+          )
+          .catch((err: any) => this.logger.warn(`Inline scoring on attachResume failed: ${err.message}`));
+      }
     }
 
     return {
@@ -256,5 +315,221 @@ export class ResumesService {
    */
   async getResumeBuffer(key: string): Promise<Buffer> {
     return this.storageService.getFileBuffer(key);
+  }
+
+  /**
+   * Runs the full ATS scoring pipeline synchronously — Gemini Flash first, local engine fallback.
+   * Called automatically when Redis/BullMQ is unavailable.
+   * Can also be invoked directly (e.g. from ApplicationsService.reparseApplication).
+   */
+  async runInlineScoring(opts: {
+    organizationId: string;
+    fileBuffer?: Buffer;
+    mimeType?: string;
+    resumeKey: string;
+    resumeUrl?: string;
+    candidateId?: string;
+    applicationId?: string;
+  }): Promise<void> {
+    const { organizationId, mimeType, resumeKey, candidateId, applicationId } = opts;
+
+    try {
+      // 1. Get file buffer (may already be provided from upload, else fetch from storage)
+      let fileBuffer = opts.fileBuffer;
+      if (!fileBuffer || fileBuffer.length === 0) {
+        try {
+          fileBuffer = await this.storageService.getFileBuffer(resumeKey);
+        } catch {
+          this.logger.warn(`Inline scoring: file not found in storage for key: ${resumeKey}`);
+          return;
+        }
+      }
+
+      if (!fileBuffer || fileBuffer.length === 0) {
+        this.logger.warn(`Inline scoring: empty buffer for key: ${resumeKey}`);
+        return;
+      }
+
+      // 2. Extract raw text
+      const rawText = await this.resumeParser.extractTextFromBuffer(fileBuffer, mimeType);
+      if (!rawText || rawText.trim().length === 0) {
+        this.logger.warn(`Inline scoring: no text extracted from ${resumeKey}`);
+        return;
+      }
+
+      // 3. Fetch application + job context if available
+      let application: any = null;
+      let targetJob: any = null;
+
+      if (applicationId) {
+        application = await this.prisma.application.findFirst({
+          where: { id: applicationId },
+          include: {
+            job: {
+              include: {
+                pipelineStages: { orderBy: { order: 'asc' } },
+              },
+            },
+            currentStage: true,
+          },
+        });
+        if (application) targetJob = application.job;
+      }
+
+      // 4. Score: Gemini Flash first, local engine fallback
+      let isAiGenerated = false;
+      let aiConfidence = 0;
+      let parsedSkills: string[] = [];
+      let atsScore = 0;
+      let candidateExtracted: Record<string, any> = {};
+      let atsScoreBreakdown: Record<string, any> = {};
+      let aiDetectionPayload: Record<string, any> = {};
+      let rejectionReason = 'Application automatically rejected: AI-written content detected in resume';
+
+      if (this.geminiParser?.isAiActive() && targetJob) {
+        this.logger.log(`Inline scoring: using Google Gemini Flash for job '${targetJob.title}'`);
+        const geminiResult = await this.geminiParser.analyzeResumeWithGemini(rawText, targetJob);
+
+        if (geminiResult) {
+          isAiGenerated = geminiResult.isAiGenerated;
+          aiConfidence = geminiResult.aiConfidence;
+          if (geminiResult.aiDetectionReason) {
+            rejectionReason = `Application automatically rejected: ${geminiResult.aiDetectionReason}`;
+          }
+          aiDetectionPayload = {
+            isAiGenerated,
+            confidence: aiConfidence,
+            verdict: isAiGenerated ? 'AI_GENERATED' : 'HUMAN_WRITTEN',
+            provider: 'GOOGLE_GEMINI_FLASH',
+            flaggedSections: geminiResult.flaggedSections,
+            reason: geminiResult.aiDetectionReason,
+          };
+          parsedSkills = geminiResult.skills || [];
+          atsScore = geminiResult.atsScore || 0;
+          candidateExtracted = geminiResult.candidateInfo || {};
+          atsScoreBreakdown = {
+            score: atsScore,
+            matchedSkills: geminiResult.matchedSkills,
+            missingSkills: geminiResult.missingSkills,
+            breakdown: geminiResult.scoreBreakdown,
+          };
+        }
+      }
+
+      // Fallback to local deterministic engine if Gemini not active or Gemini call failed
+      if (!aiDetectionPayload.provider) {
+        this.logger.log(`Inline scoring: using local deterministic engine for key: ${resumeKey}`);
+        const localAiDetection = this.aiDetector.detectAiContent(rawText);
+        isAiGenerated = localAiDetection.isAiGenerated;
+        aiConfidence = localAiDetection.overallConfidence;
+        if (localAiDetection.reason) {
+          rejectionReason = `AI-Generated Resume Detected: ${localAiDetection.reason}`;
+        }
+        aiDetectionPayload = {
+          ...localAiDetection,
+          provider: 'LOCAL_SEMANTIC_ENGINE',
+        };
+
+        const localParsed = this.resumeParser.parseResumeText(rawText);
+        parsedSkills = localParsed.skills;
+        candidateExtracted = localParsed.candidateInfo;
+
+        if (targetJob) {
+          const localAts = this.resumeParser.calculateAtsScore(localParsed, targetJob);
+          atsScore = localAts.score;
+          atsScoreBreakdown = localAts;
+        }
+      }
+
+      // 5. Auto-reject if AI-generated
+      if (isAiGenerated && application && targetJob) {
+        this.logger.warn(
+          `Inline scoring: AI-generated resume (confidence: ${aiConfidence}%). Auto-rejecting application ${applicationId}.`,
+        );
+
+        const rejectedStage = targetJob.pipelineStages?.find((s: any) =>
+          s.name.toLowerCase().includes('reject'),
+        );
+        const targetStageId = rejectedStage ? rejectedStage.id : application.currentStageId;
+
+        const updatedMeta = JSON.parse(
+          JSON.stringify({
+            ...((application.metadata as Record<string, any>) || {}),
+            aiDetection: aiDetectionPayload,
+            autoRejectedAt: new Date().toISOString(),
+          }),
+        ) as Prisma.InputJsonValue;
+
+        try {
+          await this.prisma.application.update({
+            where: { id: applicationId },
+            data: {
+              status: ApplicationStatus.REJECTED,
+              rejectionReason,
+              currentStageId: targetStageId,
+              metadata: updatedMeta,
+            },
+          });
+        } catch {
+          this.logger.warn(`Inline scoring: application ${applicationId} not found during auto-reject`);
+        }
+        return;
+      }
+
+      // 6. Merge and update candidate skills
+      if (candidateId && parsedSkills.length > 0) {
+        const existingCandidate = await this.prisma.candidate.findFirst({
+          where: { id: candidateId, ...(organizationId ? { organizationId } : {}) },
+        });
+
+        if (existingCandidate) {
+          const mergedSkills = Array.from(new Set([...existingCandidate.skills, ...parsedSkills]));
+          await this.prisma.candidate.update({
+            where: { id: candidateId },
+            data: {
+              skills: mergedSkills,
+              ...(candidateExtracted.phone && !existingCandidate.phone
+                ? { phone: candidateExtracted.phone }
+                : {}),
+              ...(candidateExtracted.linkedinUrl && !existingCandidate.linkedinUrl
+                ? { linkedinUrl: candidateExtracted.linkedinUrl }
+                : {}),
+              ...(candidateExtracted.githubUrl && !existingCandidate.githubUrl
+                ? { githubUrl: candidateExtracted.githubUrl }
+                : {}),
+            },
+          });
+        }
+      }
+
+      // 7. Write ATS score + full metadata back to the application
+      if (application && targetJob) {
+        const updatedMeta = JSON.parse(
+          JSON.stringify({
+            ...((application.metadata as Record<string, any>) || {}),
+            parsedSkills,
+            atsScoreBreakdown,
+            aiDetection: aiDetectionPayload,
+          }),
+        ) as Prisma.InputJsonValue;
+
+        try {
+          await this.prisma.application.update({
+            where: { id: applicationId },
+            data: {
+              atsScore,
+              metadata: updatedMeta,
+            },
+          });
+          this.logger.log(
+            `Inline scoring complete for application ${applicationId}. ATS Score: ${atsScore}/100 (provider: ${aiDetectionPayload.provider})`,
+          );
+        } catch {
+          this.logger.warn(`Inline scoring: application ${applicationId} not found during score update`);
+        }
+      }
+    } catch (error: any) {
+      this.logger.error(`Inline scoring failed for key ${resumeKey}: ${error.message}`, error.stack);
+    }
   }
 }

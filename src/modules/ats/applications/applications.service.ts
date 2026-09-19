@@ -5,6 +5,7 @@ import {
   ConflictException,
   Inject,
   Optional,
+  Logger,
 } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
@@ -14,6 +15,7 @@ import { CandidatesService } from '../candidates/candidates.service.js';
 import { PipelineStagesService } from '../jobs/pipeline-stages.service.js';
 import { StageTransitionService } from '../../shared/pipelines/stage-transition.service.js';
 import { CalendarService } from '../interviews/calendar.service.js';
+import { ResumesService } from '../resumes/resumes.service.js';
 import {
   RESUME_QUEUE,
   NOTIFICATION_QUEUE,
@@ -23,6 +25,8 @@ import { QueryApplicationsDto } from './dto/query-applications.dto.js';
 
 @Injectable()
 export class ApplicationsService {
+  private readonly logger = new Logger(ApplicationsService.name);
+
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(CandidatesService)
@@ -32,6 +36,7 @@ export class ApplicationsService {
     @Inject(StageTransitionService)
     private readonly stageTransitionService: StageTransitionService,
     @Optional() @Inject(CalendarService) private readonly calendarService?: CalendarService,
+    @Optional() @Inject(ResumesService) private readonly resumesService?: ResumesService,
     @Optional() @InjectQueue(RESUME_QUEUE) private readonly resumeQueue?: Queue,
     @Optional()
     @InjectQueue(NOTIFICATION_QUEUE)
@@ -536,7 +541,8 @@ export class ApplicationsService {
   }
 
   /**
-   * Re-triggers async parsing, AI detection, and scoring for an application.
+   * Re-triggers ATS parsing, AI detection, and scoring for an application.
+   * Uses BullMQ queue when Redis is available; falls back to inline synchronous scoring otherwise.
    */
   async reparseApplication(organizationId: string, applicationId: string) {
     const app = await this.findOne(organizationId, applicationId);
@@ -549,24 +555,68 @@ export class ApplicationsService {
         : null);
 
     if (!resumeKey) {
+      // Check if it's an external URL (like Google Drive) that we can't parse text from directly
+      if (app.candidate.resumeUrl?.includes('drive.google.com')) {
+        throw new BadRequestException(
+          'Cannot run AI scoring on Google Drive links. Please upload a physical PDF or Word document for this candidate to enable AI ATS matching.',
+        );
+      }
+      if (app.candidate.resumeUrl?.startsWith('http') && !app.candidate.resumeUrl.includes('resumes/')) {
+        throw new BadRequestException(
+          'Cannot run AI scoring on external URLs. Please upload a physical PDF or Word document to enable AI ATS matching.',
+        );
+      }
+
       throw new BadRequestException(
-        'No resume file found for this application or candidate',
+        'No resume file found for this application or candidate. Please upload a resume first.',
       );
     }
 
+    // Try BullMQ queue first
+    let queuedSuccessfully = false;
     if (this.resumeQueue) {
-      await this.resumeQueue.add('parse-resume', {
-        organizationId,
-        candidateId: app.candidateId,
-        jobId: app.jobId,
-        applicationId: app.id,
-        resumeKey,
-        resumeUrl: app.candidate.resumeUrl,
-      });
+      try {
+        await this.resumeQueue.add('parse-resume', {
+          organizationId,
+          candidateId: app.candidateId,
+          jobId: app.jobId,
+          applicationId: app.id,
+          resumeKey,
+          resumeUrl: app.candidate.resumeUrl,
+        });
+        queuedSuccessfully = true;
+        this.logger.log(`Reparse queued via BullMQ for application ${applicationId}`);
+      } catch (queueErr: any) {
+        this.logger.warn(
+          `BullMQ queue unavailable on reparse (${queueErr.message}). Running inline scoring fallback.`,
+        );
+      }
+    }
+
+    // Inline fallback when queue is unavailable
+    if (!queuedSuccessfully && this.resumesService) {
+      this.logger.log(`Running inline reparse for application ${applicationId}`);
+      this.resumesService
+        .runInlineScoring({
+          organizationId,
+          resumeKey,
+          resumeUrl: app.candidate.resumeUrl ?? undefined,
+          candidateId: app.candidateId,
+          applicationId: app.id,
+        })
+        .catch((err: any) =>
+          this.logger.error(`Inline reparse error for application ${applicationId}: ${err.message}`, err.stack),
+        );
+    } else if (!queuedSuccessfully) {
+      throw new BadRequestException(
+        'Resume queue is currently unavailable and inline scoring service could not be initialised.',
+      );
     }
 
     return {
-      message: 'Resume parsing and AI analysis enqueued successfully',
+      message: queuedSuccessfully
+        ? 'Resume parsing and AI analysis enqueued successfully'
+        : 'Resume parsing started (inline mode — Redis unavailable)',
       applicationId: app.id,
     };
   }
