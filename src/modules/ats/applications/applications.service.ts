@@ -196,14 +196,17 @@ export class ApplicationsService {
         ? 'resumes/' + candidateRecord.resumeUrl.split('resumes/')[1]
         : null);
 
-    if (resumeKey && this.resumeQueue) {
+    const effectiveResumeUrl =
+      (dto.metadata as Record<string, any>)?.resumeUrl || candidateRecord?.resumeUrl;
+
+    if ((resumeKey || effectiveResumeUrl) && this.resumeQueue) {
       await this.resumeQueue.add('parse-resume', {
         organizationId,
         candidateId,
         jobId: dto.jobId,
         applicationId: application.id,
-        resumeKey,
-        resumeUrl: candidateRecord?.resumeUrl,
+        resumeKey: resumeKey || 'external',
+        resumeUrl: effectiveResumeUrl,
       });
     }
 
@@ -213,11 +216,11 @@ export class ApplicationsService {
     const notificationPayload = {
       applicationId: application.id,
       candidateId,
-      candidateName: `${application.candidate.firstName} ${application.candidate.lastName}`.trim(),
-      candidatePhone: application.candidate.phone,
-      candidateEmail: application.candidate.email,
+      candidateName: `${application.candidate?.firstName || ''} ${application.candidate?.lastName || ''}`.trim() || 'Candidate',
+      candidatePhone: application.candidate?.phone,
+      candidateEmail: application.candidate?.email,
       jobId: dto.jobId,
-      jobTitle: application.job.title,
+      jobTitle: application.job?.title || 'Applied Position',
       companyName,
       stageName: initialStageName,
       fromStageName: null,
@@ -355,6 +358,9 @@ export class ApplicationsService {
     targetStageId: string,
     rejectionReason?: string,
     userId?: string,
+    sendEmail: boolean = true,
+    customNotes?: string,
+    joiningDate?: string,
   ) {
     const application = await this.findOne(organizationId, applicationId);
 
@@ -368,15 +374,18 @@ export class ApplicationsService {
       );
     }
 
-    let status = application.status;
+    let status: ApplicationStatus = application.status as ApplicationStatus;
     const stageNameLower = targetStage.name.toLowerCase();
     const currentStage = application.currentStage;
     const isTargetRejected = stageNameLower.includes('reject');
+    const isCurrentRejected =
+      currentStage?.name?.toLowerCase().includes('reject');
 
-    // Enforce forward-only pipeline progression rule
+    // Enforce forward-only pipeline progression rule (unless moving to Rejected, or restoring from Rejected)
     if (
       currentStage &&
       !isTargetRejected &&
+      !isCurrentRejected &&
       targetStage.order < currentStage.order
     ) {
       throw new BadRequestException(
@@ -398,73 +407,19 @@ export class ApplicationsService {
       status = ApplicationStatus.ACTIVE;
     }
 
-    // Auto-create persistent reserved meeting room if transitioning to an interview stage
-    const isInterviewStage =
-      stageNameLower.includes('interview') ||
-      stageNameLower.includes('technical') ||
-      stageNameLower.includes('managerial') ||
-      stageNameLower.includes('screening') ||
-      stageNameLower.includes('hr');
-
-    if (isInterviewStage) {
-      try {
-        const existingInterview = await this.prisma.interview.findFirst({
-          where: {
-            applicationId,
-            organizationId,
-            status: 'SCHEDULED',
-          },
-        });
-
-        if (!existingInterview) {
-          const cal = this.calendarService || new CalendarService();
-          const scheduledDate = new Date(Date.now() + 24 * 3600 * 1000);
-          const meetingLink = cal.generateGoogleMeetLink(applicationId);
-          const googleCalendarHtmlLink = cal.generateGoogleCalendarWebLink({
-            title: `${targetStage.name}: ${application.candidate.firstName} ${application.candidate.lastName} - ${application.job.title}`,
-            description: `Interview stage for ${application.job.title}.\nCandidate: ${application.candidate.firstName} ${application.candidate.lastName} (${application.candidate.email})`,
-            start: scheduledDate,
-            durationMinutes: 45,
-            meetingLink,
-          });
-
-          await this.prisma.interview.create({
-            data: {
-              organizationId,
-              applicationId,
-              candidateId: application.candidateId,
-              jobId: application.jobId,
-              interviewerId: userId || null,
-              title: `${targetStage.name}: ${application.candidate.firstName} - ${application.job.title}`,
-              type: stageNameLower.includes('system')
-                ? 'SYSTEM_DESIGN'
-                : stageNameLower.includes('manager')
-                ? 'MANAGERIAL'
-                : stageNameLower.includes('hr')
-                ? 'HR_FINAL'
-                : stageNameLower.includes('screen')
-                ? 'SCREENING'
-                : 'TECHNICAL',
-              status: 'SCHEDULED',
-              scheduledAt: scheduledDate,
-              durationMinutes: 45,
-              timezone: 'UTC',
-              meetingLink,
-              googleCalendarHtmlLink,
-            },
-          });
-        }
-      } catch (e) {
-        // Safe fallback - do not block stage transition if interview creation encounters duplicate
-      }
-    }
+    const existingMeta = (application.metadata as Record<string, any>) || {};
+    const updatedMetadata = {
+      ...existingMeta,
+      ...(joiningDate ? { joiningDate } : {}),
+    };
 
     const updated = await this.prisma.application.update({
       where: { id: applicationId },
       data: {
         currentStageId: targetStageId,
         status,
-        ...(rejectionReason !== undefined && { rejectionReason }),
+        rejectionReason: isTargetRejected ? (rejectionReason ?? application.rejectionReason) : null,
+        metadata: updatedMetadata,
       },
       include: {
         candidate: true,
@@ -509,28 +464,128 @@ export class ApplicationsService {
     const notificationPayload = {
       applicationId: updated.id,
       candidateId: updated.candidateId,
-      candidateName: `${updated.candidate.firstName} ${updated.candidate.lastName}`.trim(),
-      candidatePhone: updated.candidate.phone,
-      candidateEmail: updated.candidate.email,
+      candidateName: `${updated.candidate?.firstName || application.candidate?.firstName || ''} ${updated.candidate?.lastName || application.candidate?.lastName || ''}`.trim() || 'Candidate',
+      candidatePhone: updated.candidate?.phone || application.candidate?.phone,
+      candidateEmail: updated.candidate?.email || application.candidate?.email,
       jobId: updated.jobId,
-      jobTitle: updated.job.title,
+      jobTitle: updated.job?.title || application.job?.title || 'Applied Position',
       companyName,
       stageName: targetStage.name,
-      fromStageName: application.currentStage.name,
+      fromStageName: application.currentStage?.name || 'Previous Stage',
       rejectionReason,
+      customNotes,
+      joiningDate,
     };
 
-    if (this.notificationWorker) {
-      void this.notificationWorker
-        .dispatchCandidateStatusUpdate(notificationPayload)
-        .catch((err) => this.logger.error(`Status update dispatch error: ${err.message}`, err.stack));
-    } else if (this.notificationQueue) {
-      await this.notificationQueue.add('send-candidate-status-update', notificationPayload).catch((err) => {
-        this.logger.warn(`Queue dispatch failed: ${err.message}`);
-      });
+    if (sendEmail) {
+      if (this.notificationWorker) {
+        void this.notificationWorker
+          .dispatchCandidateStatusUpdate(notificationPayload)
+          .catch((err) => this.logger.error(`Status update dispatch error: ${err.message}`, err.stack));
+      } else if (this.notificationQueue) {
+        await this.notificationQueue.add('send-candidate-status-update', notificationPayload).catch((err) => {
+          this.logger.warn(`Queue dispatch failed: ${err.message}`);
+        });
+      }
     }
 
     return updated;
+  }
+
+  /**
+   * Recruiter decision on an AI-flagged candidate: either Reject or Keep in pipeline.
+   */
+  async handleAiDecision(
+    organizationId: string,
+    applicationId: string,
+    decision: 'REJECT' | 'KEEP',
+    reason?: string,
+    sendEmail: boolean = true,
+    userId?: string,
+  ) {
+    const application = await this.findOne(organizationId, applicationId);
+
+    const updatedMetadata = JSON.parse(
+      JSON.stringify({
+        ...((application.metadata as Record<string, any>) || {}),
+        aiDecision: decision === 'REJECT' ? 'REJECTED' : 'ACCEPTED',
+        aiDecisionAt: new Date().toISOString(),
+        aiDecisionBy: userId,
+      }),
+    );
+
+    if (decision === 'REJECT') {
+      const rejectedStage = application.job.pipelineStages.find(
+        (s) => s.name.toLowerCase().includes('reject'),
+      );
+      const targetStageId = rejectedStage ? rejectedStage.id : application.currentStageId;
+
+      await this.prisma.application.update({
+        where: { id: applicationId },
+        data: {
+          status: ApplicationStatus.REJECTED,
+          rejectionReason: reason || 'AI-generated resume detected.',
+          currentStageId: targetStageId,
+          metadata: updatedMetadata,
+        },
+      });
+
+      if (sendEmail) {
+        const companyName =
+          (application.job as any)?.organization?.name || 'THRM Digital Marketing Agency';
+        const notificationPayload = {
+          applicationId: application.id,
+          candidateId: application.candidateId,
+          candidateName: `${application.candidate.firstName} ${application.candidate.lastName}`.trim(),
+          candidatePhone: application.candidate.phone,
+          candidateEmail: application.candidate.email,
+          jobId: application.jobId,
+          jobTitle: application.job.title,
+          companyName,
+          stageName: 'Rejected',
+          fromStageName: application.currentStage?.name || 'Screening',
+          rejectionReason: reason || 'AI-generated resume detected.',
+        };
+
+        if (this.notificationWorker) {
+          void this.notificationWorker
+            .dispatchCandidateStatusUpdate(notificationPayload)
+            .catch((err) => this.logger.error(`Status update dispatch error: ${err.message}`));
+        } else if (this.notificationQueue) {
+          await this.notificationQueue.add('send-candidate-status-update', notificationPayload).catch((err) => {
+            this.logger.warn(`Queue dispatch failed: ${err.message}`);
+          });
+        }
+      }
+    } else {
+      // KEEP: If candidate is currently in a rejected stage, restore to the first active stage
+      const currentStageLower = application.currentStage?.name?.toLowerCase() || '';
+      const isCurrentlyRejected =
+        application.status === ApplicationStatus.REJECTED ||
+        currentStageLower.includes('reject');
+
+      let targetStageId = application.currentStageId;
+      if (isCurrentlyRejected) {
+        const firstStage = application.job.pipelineStages
+          .filter((s) => !s.name.toLowerCase().includes('reject'))
+          .sort((a, b) => a.order - b.order)[0];
+        if (firstStage) {
+          targetStageId = firstStage.id;
+        }
+      }
+
+      await this.prisma.application.update({
+        where: { id: applicationId },
+        data: {
+          status: ApplicationStatus.ACTIVE,
+          rejectionReason: null,
+          currentStageId: targetStageId,
+          metadata: updatedMetadata,
+        },
+      });
+    }
+
+    return this.findOne(organizationId, applicationId);
   }
 
   /**
