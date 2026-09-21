@@ -59,8 +59,6 @@ model Organization {
   applications        Application[]
   stageTransitionLogs StageTransitionLog[]
   interviews          Interview[]
-
-  @@index([slug])
 }
 
 model Role {
@@ -157,6 +155,8 @@ model Job {
   updatedAt       DateTime         @updatedAt
 
   @@index([organizationId])
+  @@index([organizationId, status])
+  @@index([organizationId, createdAt])
   @@index([status])
   @@index([createdById])
   @@index([createdAt])
@@ -230,6 +230,8 @@ model Candidate {
 
   @@unique([email, organizationId])
   @@index([organizationId])
+  @@index([organizationId, createdAt])
+  @@index([organizationId, source])
   @@index([email])
   @@index([createdAt])
 }
@@ -243,7 +245,7 @@ model Application {
   jobId           String
   job             Job               @relation(fields: [jobId], references: [id], onDelete: Cascade)
   currentStageId  String
-  currentStage    PipelineStage     @relation(fields: [currentStageId], references: [id], onDelete: Restrict)
+  currentStage    PipelineStage     @relation(fields: [currentStageId], references: [id], onDelete: Cascade)
   status          ApplicationStatus @default(ACTIVE)
   atsScore        Float? // AI ATS score (0-100)
   source          String?           @default("CAREER_PORTAL") // CAREER_PORTAL, LINKEDIN, NAUKRI, GLASSDOOR, UNSTOP, INDEED, REFERRAL, etc.
@@ -260,8 +262,11 @@ model Application {
 
   @@unique([candidateId, jobId])
   @@index([organizationId])
+  @@index([organizationId, status])
+  @@index([organizationId, appliedAt])
   @@index([candidateId])
   @@index([jobId])
+  @@index([jobId, currentStageId])
   @@index([currentStageId])
   @@index([status])
   @@index([source])
@@ -292,6 +297,7 @@ model StageTransitionLog {
   createdAt      DateTime           @default(now())
 
   @@index([organizationId])
+  @@index([organizationId, entityId, createdAt])
   @@index([entityType, entityId])
   @@index([createdAt])
 }
@@ -327,7 +333,7 @@ model Interview {
   interviewer            User?           @relation(fields: [interviewerId], references: [id], onDelete: SetNull)
 
   title                  String          // e.g. "Technical Interview - Backend Architecture"
-  type                   InterviewType   @default(TECHNICAL)
+  type                   InterviewType   @default(SCREENING)
   status                 InterviewStatus @default(SCHEDULED)
 
   scheduledAt            DateTime        // Start time in UTC
@@ -349,6 +355,8 @@ model Interview {
   updatedAt              DateTime        @updatedAt
 
   @@index([organizationId])
+  @@index([organizationId, status])
+  @@index([organizationId, scheduledAt])
   @@index([applicationId])
   @@index([candidateId])
   @@index([jobId])
