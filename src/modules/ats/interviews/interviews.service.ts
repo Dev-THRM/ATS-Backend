@@ -65,19 +65,20 @@ export class InterviewsService {
       throw new BadRequestException('Invalid scheduledAt date format');
     }
 
-    // 1. Generate automated Google Meet link if not provided
+    // 1. Keep meetingLink as provided (for online meetings) or null (for offline meetings)
     const meetingLink =
       dto.meetingLink && dto.meetingLink.trim() !== ''
         ? dto.meetingLink.trim()
-        : this.calendarService.generateGoogleMeetLink(dto.applicationId);
+        : null;
 
     // 2. Generate 1-click Google Calendar Web Add Link
     const googleCalendarHtmlLink = this.calendarService.generateGoogleCalendarWebLink({
       title: `${dto.title} - ${application.candidate.firstName} ${application.candidate.lastName}`,
-      description: `Interview for ${application.job.title} at ${application.job.organization?.name || 'Our Company'}.\nCandidate: ${application.candidate.firstName} ${application.candidate.lastName} (${application.candidate.email})`,
+      description: `Interview for ${application.job.title} at ${application.job.organization?.name || 'Our Company'}.\nCandidate: ${application.candidate.firstName} ${application.candidate.lastName} (${application.candidate.email})${dto.locationNotes ? `\nInstructions: ${dto.locationNotes}` : ''}`,
       start: scheduledDate,
       durationMinutes: dto.durationMinutes || 45,
       meetingLink,
+      locationNotes: dto.locationNotes,
     });
 
     // 3. Persist Interview record
@@ -125,7 +126,8 @@ export class InterviewsService {
       interviewTitle: dto.title,
       scheduledAt: scheduledDate,
       durationMinutes: dto.durationMinutes || 45,
-      meetingLink,
+      meetingLink: meetingLink || undefined,
+      locationNotes: dto.locationNotes,
       type: 'INVITE' as const,
     };
 
