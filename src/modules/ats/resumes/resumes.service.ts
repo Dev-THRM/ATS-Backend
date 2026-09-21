@@ -498,80 +498,27 @@ export class ResumesService {
         }
       }
 
-      // 5. Auto-reject if AI-generated
+      // 5. Flag AI-generated resume for recruiter decision (do not auto-reject)
       if (isAiGenerated && application && targetJob) {
-        this.logger.warn(
-          `Inline scoring: AI-generated resume (confidence: ${aiConfidence}%). Auto-rejecting application ${applicationId}.`,
+        this.logger.log(
+          `Inline scoring: AI-generated resume flagged (confidence: ${aiConfidence}%). Flagged for recruiter review without auto-rejecting.`,
         );
-
-        const rejectedStage = targetJob.pipelineStages?.find((s: any) =>
-          s.name.toLowerCase().includes('reject'),
-        );
-        const targetStageId = rejectedStage ? rejectedStage.id : application.currentStageId;
-
-        const updatedMeta = JSON.parse(
-          JSON.stringify({
-            ...((application.metadata as Record<string, any>) || {}),
-            aiDetection: aiDetectionPayload,
-            autoRejectedAt: new Date().toISOString(),
-          }),
-        ) as Prisma.InputJsonValue;
-
-        try {
-          const appRecord = await this.prisma.application.findUnique({
-            where: { id: applicationId },
-            include: {
-              candidate: true,
-              job: {
-                include: {
-                  organization: true,
-                },
-              },
-            },
-          });
-
-          await this.prisma.application.update({
-            where: { id: applicationId },
-            data: {
-              status: ApplicationStatus.REJECTED,
-              rejectionReason,
-              currentStageId: targetStageId,
-              metadata: updatedMeta,
-            },
-          });
-
-          if (this.notificationWorker && appRecord) {
-            void this.notificationWorker
-              .dispatchCandidateStatusUpdate({
-                applicationId: applicationId || appRecord.id,
-                candidateId: appRecord.candidateId,
-                candidateName: `${appRecord.candidate.firstName} ${appRecord.candidate.lastName}`.trim(),
-                candidatePhone: appRecord.candidate.phone,
-                candidateEmail: appRecord.candidate.email,
-                jobId: appRecord.jobId,
-                jobTitle: appRecord.job?.title || 'Applied Position',
-                companyName: appRecord.job?.organization?.name || 'THRM Digital Marketing Agency',
-                stageName: 'Rejected',
-                rejectionReason,
-              })
-              .catch((err) =>
-                this.logger.error(`Failed to dispatch auto-rejection notification: ${err.message}`),
-              );
-          }
-        } catch {
-          this.logger.warn(`Inline scoring: application ${applicationId} not found during auto-reject`);
-        }
-        return;
       }
 
       // 6. Merge and update candidate skills
-      if (candidateId && parsedSkills.length > 0) {
+      const skillsToSave = parsedSkills.length > 0
+        ? parsedSkills
+        : (Array.isArray(atsScoreBreakdown.matchedSkills) && atsScoreBreakdown.matchedSkills.length > 0)
+          ? atsScoreBreakdown.matchedSkills
+          : [];
+
+      if (candidateId && skillsToSave.length > 0) {
         const existingCandidate = await this.prisma.candidate.findFirst({
           where: { id: candidateId, ...(organizationId ? { organizationId } : {}) },
         });
 
         if (existingCandidate) {
-          const mergedSkills = Array.from(new Set([...existingCandidate.skills, ...parsedSkills]));
+          const mergedSkills = Array.from(new Set([...existingCandidate.skills, ...skillsToSave]));
           await this.prisma.candidate.update({
             where: { id: candidateId },
             data: {
@@ -595,7 +542,7 @@ export class ResumesService {
         const updatedMeta = JSON.parse(
           JSON.stringify({
             ...((application.metadata as Record<string, any>) || {}),
-            parsedSkills,
+            parsedSkills: skillsToSave,
             atsScoreBreakdown,
             aiDetection: aiDetectionPayload,
           }),
