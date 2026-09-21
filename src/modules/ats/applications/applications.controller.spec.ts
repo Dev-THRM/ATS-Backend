@@ -64,6 +64,8 @@ describe('ApplicationsController', () => {
       'st-interview',
       undefined,
       mockUserId,
+      true,
+      undefined,
     );
   });
 
