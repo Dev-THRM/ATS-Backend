@@ -26,6 +26,7 @@ import { CreateApplicationDto } from './dto/create-application.dto.js';
 import { QueryApplicationsDto } from './dto/query-applications.dto.js';
 import { UpdateApplicationStageDto } from './dto/update-application-stage.dto.js';
 import { UpdateApplicationStatusDto } from './dto/update-application-status.dto.js';
+import { AiDecisionDto } from './dto/ai-decision.dto.js';
 
 @Controller('ats/applications')
 @UseGuards(JwtAuthGuard, PlanGuard, RolesGuard)
@@ -165,6 +166,9 @@ export class ApplicationsController {
       targetStageId,
       dto.rejectionReason,
       userId,
+      dto.sendEmail !== false,
+      dto.customNotes,
+      dto.joiningDate,
     );
   }
 
@@ -186,6 +190,30 @@ export class ApplicationsController {
       id,
       dto.status,
       dto.rejectionReason,
+    );
+  }
+
+  @Patch(':id/ai-decision')
+  @Roles(
+    SystemRoleType.SUPER_ADMIN,
+    SystemRoleType.ADMIN,
+    SystemRoleType.RECRUITER,
+    SystemRoleType.MANAGER,
+  )
+  @Permissions('applications:update')
+  handleAiDecision(
+    @CurrentUser('organizationId') orgId: string,
+    @CurrentUser('userId') userId: string,
+    @Param('id') id: string,
+    @Body() dto: AiDecisionDto,
+  ) {
+    return this.applicationsService.handleAiDecision(
+      orgId,
+      id,
+      dto.decision,
+      dto.reason,
+      dto.sendEmail !== false,
+      userId,
     );
   }
 
