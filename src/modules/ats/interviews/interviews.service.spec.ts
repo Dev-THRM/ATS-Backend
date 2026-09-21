@@ -32,7 +32,7 @@ describe('InterviewsService', () => {
     service = new InterviewsService(prismaMock, calendarService, queueMock);
   });
 
-  it('should schedule interview, auto-generate Google Meet link, and enqueue WhatsApp invite + 1-day reminder', async () => {
+  it('should schedule offline interview by default when no meeting link is provided', async () => {
     const scheduledDate = new Date(Date.now() + 48 * 60 * 60 * 1000); // 2 days in the future
 
     prismaMock.application.findFirst.mockResolvedValue({
@@ -75,10 +75,10 @@ describe('InterviewsService', () => {
     );
 
     expect(result.id).toBe('interview-1');
-    expect(result.meetingLink).toMatch(/^https:\/\/meet\.google\.com\//);
+    expect(result.meetingLink).toBeNull();
     expect(result.googleCalendarHtmlLink).toBeDefined();
 
-    // Verify WhatsApp invite was enqueued
+    // Verify WhatsApp invite was enqueued with offline details
     expect(queueMock.add).toHaveBeenCalledWith(
       'send-interview-invite',
       expect.objectContaining({
@@ -100,6 +100,53 @@ describe('InterviewsService', () => {
         delay: expect.any(Number),
       }),
     );
+  });
+
+  it('should schedule online interview when Google Meet meetingLink is provided', async () => {
+    const scheduledDate = new Date(Date.now() + 48 * 60 * 60 * 1000);
+
+    prismaMock.application.findFirst.mockResolvedValue({
+      id: 'app-1',
+      organizationId: 'org-1',
+      candidateId: 'cand-1',
+      jobId: 'job-1',
+      candidate: {
+        id: 'cand-1',
+        firstName: 'Elena',
+        lastName: 'Rostova',
+        phone: '+5511999887766',
+        email: 'elena@example.com',
+      },
+      job: {
+        id: 'job-1',
+        title: 'Lead Architect',
+        organization: { name: 'Acme Corp' },
+      },
+      currentStage: { id: 'st-interview', name: 'Interview' },
+    });
+
+    prismaMock.interview.create.mockImplementation(({ data }: any) => ({
+      id: 'interview-2',
+      ...data,
+      candidate: { firstName: 'Elena', lastName: 'Rostova' },
+      job: { title: 'Lead Architect' },
+    }));
+
+    const result = await service.create(
+      'org-1',
+      {
+        applicationId: 'app-1',
+        title: 'Technical Round 1',
+        type: InterviewType.TECHNICAL,
+        scheduledAt: scheduledDate.toISOString(),
+        durationMinutes: 45,
+        meetingLink: 'https://meet.google.com/xyz-abcd-uvw',
+      },
+      'user-hr-1',
+    );
+
+    expect(result.id).toBe('interview-2');
+    expect(result.meetingLink).toBe('https://meet.google.com/xyz-abcd-uvw');
   });
 
   it('should submit feedback and mark interview as COMPLETED', async () => {
