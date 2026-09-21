@@ -68,7 +68,7 @@ describe('ResumeProcessorWorker', () => {
     expect(worker).toBeDefined();
   });
 
-  it('should auto-reject application when AI content is detected', async () => {
+  it('should flag AI-generated resume for recruiter decision without auto-rejecting', async () => {
     const mockApp = {
       id: 'app-1',
       status: ApplicationStatus.ACTIVE,
@@ -96,7 +96,7 @@ describe('ResumeProcessorWorker', () => {
     vi.spyOn(prisma.application, 'findFirst').mockResolvedValue(mockApp as any);
     vi.spyOn(prisma.application, 'update').mockResolvedValue({
       id: 'app-1',
-      status: ApplicationStatus.REJECTED,
+      status: ApplicationStatus.ACTIVE,
     } as any);
 
     const result = await worker.process({
@@ -110,17 +110,18 @@ describe('ResumeProcessorWorker', () => {
     } as any);
 
     expect(result.verdict).toBe('AI_GENERATED');
-    expect(result.status).toBe('REJECTED');
     expect(prisma.application.update).toHaveBeenCalledWith(
       expect.objectContaining({
         where: { id: 'app-1' },
         data: expect.objectContaining({
-          status: ApplicationStatus.REJECTED,
-          currentStageId: 'st-reject',
+          metadata: expect.objectContaining({
+            aiDetection: expect.objectContaining({
+              isAiGenerated: true,
+            }),
+          }),
         }),
       }),
     );
-    expect(stageTransitionService.recordTransition).toHaveBeenCalled();
   });
 
   it('should parse details and stamp ATS score when resume is human-written', async () => {
