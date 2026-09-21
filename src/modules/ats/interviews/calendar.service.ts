@@ -5,9 +5,10 @@ export interface CalendarEventDetails {
   description: string;
   start: Date;
   durationMinutes: number;
-  meetingLink?: string;
+  meetingLink?: string | null;
   organizerEmail?: string;
   candidateName?: string;
+  locationNotes?: string;
 }
 
 @Injectable()
@@ -54,14 +55,16 @@ export class CalendarService {
     const end = new Date(details.start.getTime() + details.durationMinutes * 60 * 1000);
     const endIso = end.toISOString().replace(/-|:|\.\d+/g, '');
 
+    const locationText = details.meetingLink || details.locationNotes || 'Office / In-Person';
+
     const params = new URLSearchParams({
       action: 'TEMPLATE',
       text: details.title,
       dates: `${startIso}/${endIso}`,
       details: `${details.description}${
-        details.meetingLink ? `\n\nGoogle Meet: ${details.meetingLink}` : ''
-      }`,
-      location: details.meetingLink || 'Google Meet',
+        details.meetingLink ? `\n\nGoogle Meet: ${details.meetingLink}` : '\n\nMode: Offline / In-Person'
+      }${details.locationNotes ? `\nLocation Notes: ${details.locationNotes}` : ''}`,
+      location: locationText,
     });
 
     return `https://calendar.google.com/calendar/render?${params.toString()}`;
@@ -77,6 +80,7 @@ export class CalendarService {
     const end = new Date(details.start.getTime() + details.durationMinutes * 60 * 1000);
     const endIso = end.toISOString().replace(/-|:|\.\d+/g, '');
     const eventUid = uid || `interview_${Date.now()}@ats`;
+    const locationText = details.meetingLink || details.locationNotes || 'Office / In-Person';
 
     return [
       'BEGIN:VCALENDAR',
@@ -91,7 +95,7 @@ export class CalendarService {
       `DTEND:${endIso}`,
       `SUMMARY:${details.title}`,
       `DESCRIPTION:${details.description.replace(/\n/g, '\\n')}`,
-      `LOCATION:${details.meetingLink || 'Google Meet'}`,
+      `LOCATION:${locationText}`,
       'STATUS:CONFIRMED',
       'END:VEVENT',
       'END:VCALENDAR',
