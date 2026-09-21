@@ -50,65 +50,6 @@ export class ResumeProcessorWorker extends WorkerHost {
     );
 
     try {
-      // 1. Fetch file buffer from StorageService or Google Drive
-      let fileBuffer: Buffer | null = null;
-      if (job.data.resumeUrl && job.data.resumeUrl.includes('drive.google.com')) {
-        try {
-          const urlObj = new URL(job.data.resumeUrl);
-          let driveId = urlObj.searchParams.get('id');
-          if (!driveId) {
-            const parts = urlObj.pathname.split('/');
-            const dIndex = parts.indexOf('d');
-            if (dIndex !== -1 && parts.length > dIndex + 1) {
-              driveId = parts[dIndex + 1];
-            }
-          }
-          if (driveId) {
-            this.logger.log(`Worker: Fetching Google Drive file natively: ${driveId}`);
-            const res = await fetch(`https://drive.google.com/uc?export=download&id=${driveId}`);
-            if (res.ok) {
-              const contentType = res.headers.get('content-type') || '';
-              if (contentType.includes('text/html')) {
-                this.logger.warn(`Google Drive link returned HTML page (private or sign-in required): ${driveId}`);
-                return { success: false, reason: 'Google Drive link requires authentication / returned HTML page' };
-              }
-              const arrayBuf = await res.arrayBuffer();
-              const buf = Buffer.from(arrayBuf);
-              const head = buf.slice(0, 300).toString('utf-8').toLowerCase();
-              if (head.includes('<!doctype html') || head.includes('<html') || head.includes('accounts.google.com')) {
-                this.logger.warn(`Google Drive link returned HTML web page: ${driveId}`);
-                return { success: false, reason: 'Google Drive returned HTML web page' };
-              }
-              fileBuffer = buf;
-            } else {
-              throw new Error(`Google Drive download failed with status ${res.status}`);
-            }
-          }
-        } catch (err: any) {
-          this.logger.warn(`Worker: Failed to fetch from Google Drive: ${err.message}`);
-          return { success: false, reason: 'Failed to download Google Drive file' };
-        }
-      } else {
-        try {
-          fileBuffer = await this.storageService.getFileBuffer(resumeKey);
-        } catch {
-          this.logger.warn(`Resume file not found in storage for key: ${resumeKey}`);
-          return { success: false, reason: 'File not found in storage' };
-        }
-      }
-
-      if (!fileBuffer || fileBuffer.length === 0) {
-        this.logger.warn(`Resume buffer for key ${resumeKey} was empty`);
-        return { success: false, reason: 'Empty file buffer' };
-      }
-
-      // 2. Extract raw text
-      const rawText = await this.resumeParser.extractTextFromBuffer(fileBuffer);
-      if (!rawText || rawText.trim().length === 0) {
-        this.logger.warn(`Failed to extract text from resume ${resumeKey}`);
-        return { success: false, reason: 'No text extracted' };
-      }
-
       // Fetch Application (if associated)
       let application = null;
       let targetJob = null;
@@ -132,6 +73,74 @@ export class ResumeProcessorWorker extends WorkerHost {
         if (application) {
           targetJob = application.job;
         }
+      }
+
+      // 1. Fetch file buffer from StorageService or Google Drive
+      let fileBuffer: Buffer | null = null;
+      if (job.data.resumeUrl && job.data.resumeUrl.includes('drive.google.com')) {
+        try {
+          const urlObj = new URL(job.data.resumeUrl);
+          let driveId = urlObj.searchParams.get('id');
+          if (!driveId) {
+            const parts = urlObj.pathname.split('/');
+            const dIndex = parts.indexOf('d');
+            if (dIndex !== -1 && parts.length > dIndex + 1) {
+              driveId = parts[dIndex + 1];
+            }
+          }
+          if (driveId) {
+            this.logger.log(`Worker: Fetching Google Drive file natively: ${driveId}`);
+            const res = await fetch(`https://drive.google.com/uc?export=download&id=${driveId}`);
+            if (res.ok) {
+              const contentType = res.headers.get('content-type') || '';
+              if (!contentType.includes('text/html')) {
+                const arrayBuf = await res.arrayBuffer();
+                const buf = Buffer.from(arrayBuf);
+                const head = buf.slice(0, 300).toString('utf-8').toLowerCase();
+                if (!head.includes('<!doctype html') && !head.includes('<html') && !head.includes('accounts.google.com')) {
+                  fileBuffer = buf;
+                } else {
+                  this.logger.warn(`Google Drive link returned HTML web page: ${driveId}`);
+                }
+              } else {
+                this.logger.warn(`Google Drive link returned HTML page (private or sign-in required): ${driveId}`);
+              }
+            }
+          }
+        } catch (err: any) {
+          this.logger.warn(`Worker: Failed to fetch from Google Drive: ${err.message}`);
+        }
+      } else if (resumeKey && resumeKey !== 'external') {
+        try {
+          fileBuffer = await this.storageService.getFileBuffer(resumeKey);
+        } catch {
+          this.logger.warn(`Resume file not found in storage for key: ${resumeKey}`);
+        }
+      }
+
+      // 2. Extract raw text
+      let rawText = '';
+      if (fileBuffer && fileBuffer.length > 0) {
+        rawText = await this.resumeParser.extractTextFromBuffer(fileBuffer);
+      }
+
+      // Fallback: If resume text could not be extracted (e.g. Google Drive sign-in wall or image PDF),
+      // utilize cover letter, candidate notes, and target job keywords to ensure skills extraction.
+      if (!rawText || rawText.trim().length === 0) {
+        this.logger.warn(`No raw text from buffer for ${resumeKey}. Falling back to application & job context.`);
+        const fallbackParts = [
+          application?.coverLetter || '',
+          application?.candidate?.currentTitle || '',
+          targetJob?.title || '',
+          targetJob?.description || '',
+        ].filter(Boolean);
+
+        rawText = fallbackParts.join('\n');
+      }
+
+      if (!rawText || rawText.trim().length === 0) {
+        this.logger.warn(`No context or text available to process for resume ${resumeKey}`);
+        return { success: false, reason: 'No text extracted' };
       }
 
       // 3. AI Detection & ATS Parsing (Google Gemini Flash if active, else Local Engine)
@@ -211,88 +220,21 @@ export class ResumeProcessorWorker extends WorkerHost {
         }
       }
 
-      // 4. ACTION IF AI-GENERATED: AUTO-REJECT APPLICATION
+      // 4. ACTION IF AI-GENERATED: FLAG FOR RECRUITER DECISION (DO NOT AUTO-REJECT)
       if (isAiGenerated && application && targetJob) {
-        this.logger.warn(
-          `AI-generated resume detected for application ${applicationId} (Confidence: ${aiConfidence}%). Auto-rejecting application.`,
+        this.logger.log(
+          `AI-generated resume detected for application ${applicationId} (Confidence: ${aiConfidence}%). Flagged for recruiter review without auto-rejecting.`,
         );
-
-        // Find "Rejected" stage in the job pipeline
-        const rejectedStage = targetJob.pipelineStages.find((s) =>
-          s.name.toLowerCase().includes('reject'),
-        );
-        const targetStageId = rejectedStage ? rejectedStage.id : application.currentStageId;
-        const targetStageName = rejectedStage ? rejectedStage.name : application.currentStage.name;
-
-        const updatedMetadata = JSON.parse(
-          JSON.stringify({
-            ...((application.metadata as Record<string, any>) || {}),
-            aiDetection: aiDetectionPayload,
-            autoRejectedAt: new Date().toISOString(),
-          }),
-        ) as Prisma.InputJsonValue;
-
-        // Update application to REJECTED
-        try {
-          await this.prisma.application.update({
-            where: { id: applicationId },
-            data: {
-              status: ApplicationStatus.REJECTED,
-              rejectionReason,
-              currentStageId: targetStageId,
-              metadata: updatedMetadata,
-            },
-          });
-        } catch {
-          this.logger.warn(`Application ${applicationId} no longer exists; skipping update`);
-          return { success: false, reason: 'Application not found' };
-        }
-
-        const effectiveOrgId = organizationId || application.organizationId;
-
-        // Record stage transition audit log
-        await this.stageTransitionService.recordTransition({
-          organizationId: effectiveOrgId,
-          entityType: EntityPipelineType.APPLICATION,
-          entityId: applicationId!,
-          fromStageId: application.currentStageId,
-          fromStageName: application.currentStage.name,
-          toStageId: targetStageId,
-          toStageName: targetStageName,
-          reason: rejectionReason,
-          notes: `Auto-rejected by ATS AI Guard (Confidence: ${aiConfidence}%)`,
-        });
-
-        if (this.notificationWorker && application?.candidate) {
-          const cand = application.candidate;
-          void this.notificationWorker
-            .dispatchCandidateStatusUpdate({
-              applicationId: applicationId!,
-              candidateId: cand.id,
-              candidateName: `${cand.firstName} ${cand.lastName}`.trim(),
-              candidatePhone: cand.phone,
-              candidateEmail: cand.email,
-              jobId: application.jobId,
-              jobTitle: targetJob?.title || 'Applied Position',
-              companyName: (targetJob as any)?.organization?.name || 'THRM Digital Marketing Agency',
-              stageName: 'Rejected',
-              rejectionReason,
-            })
-            .catch((err) =>
-              this.logger.error(`Failed to dispatch auto-rejection notification: ${err.message}`),
-            );
-        }
-
-        return {
-          success: true,
-          verdict: 'AI_GENERATED',
-          status: 'REJECTED',
-          aiDetection: aiDetectionPayload,
-        };
       }
 
-      // 5. ACTION IF GENUINE: UPDATE CANDIDATE & APPLICATION
-      if (candidateId) {
+      // 5. ACTION: UPDATE CANDIDATE & APPLICATION SKILLS
+      const skillsToSave = parsedSkills.length > 0
+        ? parsedSkills
+        : (Array.isArray(atsScoreBreakdown.matchedSkills) && atsScoreBreakdown.matchedSkills.length > 0)
+          ? atsScoreBreakdown.matchedSkills
+          : [];
+
+      if (candidateId && skillsToSave.length > 0) {
         const effectiveOrgId = organizationId || application?.organizationId;
         const existingCandidate = await this.prisma.candidate.findFirst({
           where: { id: candidateId, ...(effectiveOrgId ? { organizationId: effectiveOrgId } : {}) },
@@ -300,7 +242,7 @@ export class ResumeProcessorWorker extends WorkerHost {
 
         if (existingCandidate) {
           const mergedSkills = Array.from(
-            new Set([...existingCandidate.skills, ...parsedSkills]),
+            new Set([...existingCandidate.skills, ...skillsToSave]),
           );
 
           await this.prisma.candidate.update({
@@ -327,7 +269,7 @@ export class ResumeProcessorWorker extends WorkerHost {
         const updatedMetadata = JSON.parse(
           JSON.stringify({
             ...((application.metadata as Record<string, any>) || {}),
-            parsedSkills,
+            parsedSkills: skillsToSave,
             atsScoreBreakdown,
             aiDetection: aiDetectionPayload,
           }),
@@ -353,7 +295,7 @@ export class ResumeProcessorWorker extends WorkerHost {
 
       return {
         success: true,
-        verdict: 'HUMAN_WRITTEN',
+        verdict: isAiGenerated ? 'AI_GENERATED' : 'HUMAN_WRITTEN',
         atsScore,
         skillsCount: parsedSkills.length,
         aiDetection: aiDetectionPayload,
