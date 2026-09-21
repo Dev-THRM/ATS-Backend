@@ -77,10 +77,12 @@ async function bootstrap() {
       if (allowedOrigins.includes('*') || allowedOrigins.includes(origin)) {
         return callback(null, true);
       }
-      // In development, be permissive of any localhost/127.0.0.1 port
+      // In development, be permissive of localhost, 127.0.0.1 and private LAN addresses (for mobile device testing)
       if (
         process.env.NODE_ENV !== 'production' &&
-        (origin.startsWith('http://localhost:') || origin.startsWith('http://127.0.0.1:'))
+        (origin.startsWith('http://localhost:') ||
+          origin.startsWith('http://127.0.0.1:') ||
+          /^https?:\/\/(192\.168|10\.|172\.(1[6-9]|2[0-9]|3[0-1]))\./.test(origin))
       ) {
         return callback(null, true);
       }
