@@ -21,6 +21,7 @@ export interface CandidateStatusUpdateJobData {
   fromStageName?: string | null;
   rejectionReason?: string | null;
   customNotes?: string | null;
+  joiningDate?: string | null;
   channel?: 'WHATSAPP' | 'EMAIL' | 'ALL';
 }
 
@@ -36,7 +37,8 @@ export interface InterviewNotificationJobData {
   interviewTitle: string;
   scheduledAt: Date | string;
   durationMinutes: number;
-  meetingLink: string;
+  meetingLink?: string | null;
+  locationNotes?: string | null;
   type: 'INVITE' | 'REMINDER';
 }
 
@@ -149,6 +151,7 @@ export class CandidateNotificationWorker extends WorkerHost {
       stageName,
       rejectionReason,
       customNotes,
+      joiningDate,
     } = data;
 
     const resolvedCompany = companyName || 'THRM Digital Marketing Agency';
@@ -192,6 +195,7 @@ export class CandidateNotificationWorker extends WorkerHost {
           stageName,
           rejectionReason: rejectionReason || undefined,
           customNotes: customNotes || undefined,
+          joiningDate: joiningDate || undefined,
         });
 
         whatsAppResult = await this.whatsAppService.send({
@@ -231,6 +235,7 @@ export class CandidateNotificationWorker extends WorkerHost {
           stageName,
           rejectionReason,
           customNotes,
+          joiningDate,
         });
 
         emailResult = await this.emailService.sendMail({
@@ -336,12 +341,14 @@ export class CandidateNotificationWorker extends WorkerHost {
       applicationId,
       candidateName,
       candidatePhone,
+      candidateEmail,
       jobTitle,
       companyName,
       interviewTitle,
       scheduledAt,
       durationMinutes,
       meetingLink,
+      locationNotes,
       type,
     } = data;
 
@@ -368,42 +375,118 @@ export class CandidateNotificationWorker extends WorkerHost {
       }
     }
 
-    if (!candidatePhone) {
+    if (!candidatePhone && !candidateEmail) {
       this.logger.warn(
-        `Candidate ${candidateName} has no phone number. Skipping interview ${type} WhatsApp.`,
+        `Candidate ${candidateName} has neither phone number nor email. Skipping interview ${type} notification.`,
       );
-      return { skipped: true, reason: 'NO_PHONE_NUMBER' };
+      return { skipped: true, reason: 'NO_CONTACT_INFO' };
     }
 
-    const rendered =
-      type === 'REMINDER'
-        ? this.templatesService.renderInterviewReminderMessage({
-            candidateName,
-            jobTitle,
-            companyName: companyName || 'Our Company',
-            interviewTitle: interviewTitle || 'Interview',
-            scheduledAt,
-            meetingLink,
-          })
-        : this.templatesService.renderInterviewScheduledMessage({
-            candidateName,
-            jobTitle,
-            companyName: companyName || 'Our Company',
-            interviewTitle: interviewTitle || 'Interview',
-            scheduledAt,
-            meetingLink,
-            durationMinutes,
-          });
+    const newLogs: any[] = [];
+    let emailResult: any = null;
+    let whatsAppResult: any = null;
+    let renderedWhatsApp: any = null;
 
-    const sendResult = await this.whatsAppService.send({
-      to: candidatePhone,
-      templateName: rendered.templateName,
-      languageCode: rendered.languageCode,
-      parameters: rendered.parameters,
-      bodyText: rendered.bodyText,
-    });
+    // 1. Dispatch Email Notification (for new interview invitations or reminders)
+    if (candidateEmail && candidateEmail.includes('@')) {
+      try {
+        const renderedEmail = this.emailTemplatesService.renderInterviewInvitationEmail({
+          candidateName,
+          jobTitle,
+          companyName: companyName || 'Our Company',
+          interviewTitle: interviewTitle || 'Interview',
+          scheduledAt,
+          durationMinutes: durationMinutes || 45,
+          meetingLink,
+          locationNotes,
+        });
 
-    // Mark reminder as sent in interview record if this is a reminder
+        emailResult = await this.emailService.sendMail({
+          to: candidateEmail,
+          subject: renderedEmail.subject,
+          html: renderedEmail.html,
+          text: renderedEmail.text,
+        });
+
+        newLogs.push({
+          channel: 'EMAIL',
+          type: type === 'REMINDER' ? 'INTERVIEW_REMINDER' : 'INTERVIEW_INVITE',
+          stage: 'Interview',
+          subject: renderedEmail.subject,
+          recipientEmail: candidateEmail,
+          meetingLink,
+          messagePreview: renderedEmail.text,
+          messageId: emailResult.messageId || null,
+          provider: emailResult.simulated ? 'GMAIL_SIMULATED' : 'GMAIL_SMTP',
+          success: emailResult.success,
+          error: emailResult.error || null,
+          sentAt: emailResult.timestamp,
+        });
+      } catch (emailErr: any) {
+        this.logger.error(`Error sending interview email to ${candidateEmail}: ${emailErr.message}`);
+        newLogs.push({
+          channel: 'EMAIL',
+          type: type === 'REMINDER' ? 'INTERVIEW_REMINDER' : 'INTERVIEW_INVITE',
+          stage: 'Interview',
+          recipientEmail: candidateEmail,
+          success: false,
+          error: emailErr.message,
+          sentAt: new Date().toISOString(),
+        });
+      }
+    }
+
+    // 2. Dispatch WhatsApp Notification (if candidatePhone is provided)
+    if (candidatePhone) {
+      try {
+        renderedWhatsApp =
+          type === 'REMINDER'
+            ? this.templatesService.renderInterviewReminderMessage({
+                candidateName,
+                jobTitle,
+                companyName: companyName || 'Our Company',
+                interviewTitle: interviewTitle || 'Interview',
+                scheduledAt,
+                meetingLink,
+              })
+            : this.templatesService.renderInterviewScheduledMessage({
+                candidateName,
+                jobTitle,
+                companyName: companyName || 'Our Company',
+                interviewTitle: interviewTitle || 'Interview',
+                scheduledAt,
+                meetingLink,
+                durationMinutes,
+              });
+
+        whatsAppResult = await this.whatsAppService.send({
+          to: candidatePhone,
+          templateName: renderedWhatsApp.templateName,
+          languageCode: renderedWhatsApp.languageCode,
+          parameters: renderedWhatsApp.parameters,
+          bodyText: renderedWhatsApp.bodyText,
+        });
+
+        newLogs.push({
+          channel: 'WHATSAPP',
+          type: type === 'REMINDER' ? 'INTERVIEW_REMINDER' : 'INTERVIEW_INVITE',
+          stage: 'Interview',
+          templateName: renderedWhatsApp.templateName,
+          recipientPhone: candidatePhone,
+          meetingLink,
+          messagePreview: renderedWhatsApp.bodyText,
+          messageId: whatsAppResult.messageId || null,
+          provider: whatsAppResult.provider,
+          success: whatsAppResult.success,
+          error: whatsAppResult.error || null,
+          sentAt: whatsAppResult.timestamp,
+        });
+      } catch (waErr: any) {
+        this.logger.error(`Error sending interview WhatsApp to ${candidatePhone}: ${waErr.message}`);
+      }
+    }
+
+    // 3. Mark reminder as sent in interview record if this is a reminder
     if (type === 'REMINDER' && interviewId) {
       try {
         await this.prisma.interview.updateMany({
@@ -420,8 +503,8 @@ export class CandidateNotificationWorker extends WorkerHost {
       }
     }
 
-    // Persist communication entry in Application metadata
-    if (applicationId) {
+    // 4. Persist communication entries in Application metadata
+    if (applicationId && newLogs.length > 0) {
       try {
         const application = await this.prisma.application.findUnique({
           where: { id: applicationId },
@@ -433,19 +516,7 @@ export class CandidateNotificationWorker extends WorkerHost {
             ? metadata.communications
             : [];
 
-          communications.push({
-            channel: 'WHATSAPP',
-            type: type === 'REMINDER' ? 'INTERVIEW_REMINDER' : 'INTERVIEW_INVITE',
-            stage: 'Interview',
-            templateName: rendered.templateName,
-            recipientPhone: candidatePhone,
-            meetingLink,
-            messagePreview: rendered.bodyText,
-            messageId: sendResult.messageId || null,
-            provider: sendResult.provider,
-            success: sendResult.success,
-            sentAt: sendResult.timestamp,
-          });
+          communications.push(...newLogs);
 
           await this.prisma.application.updateMany({
             where: { id: applicationId },
@@ -466,10 +537,10 @@ export class CandidateNotificationWorker extends WorkerHost {
     }
 
     return {
-      success: sendResult.success,
-      messageId: sendResult.messageId,
-      provider: sendResult.provider,
-      templateName: rendered.templateName,
+      success: Boolean(emailResult?.success || whatsAppResult?.success),
+      emailResult,
+      whatsAppResult,
+      templateName: renderedWhatsApp?.templateName || 'ats_interview_scheduled',
       meetingLink,
     };
   }
