@@ -51,6 +51,10 @@ export class ImportCandidateRowDto {
   @IsOptional()
   experienceYears?: number;
 
+  @IsString()
+  @IsOptional()
+  resumeUrl?: string;
+
   @IsArray()
   @IsString({ each: true })
   @IsOptional()
