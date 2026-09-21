@@ -256,7 +256,7 @@ export class PublicCareerService {
       email: dto.email,
       phone: dto.phone,
       currentCompany: dto.currentCompany,
-      currentTitle: dto.currentTitle,
+      currentTitle: dto.currentTitle || job.title || 'Applicant',
       location: dto.location,
       linkedinUrl: dto.linkedinUrl,
       portfolioUrl: dto.portfolioUrl,
@@ -454,19 +454,27 @@ export class PublicCareerService {
       const p = phrase.toLowerCase().trim();
       if (!p) return null;
 
+      // 0. Acronym / Synonym normalization
+      const normalizedP = p === 'hr' || p === 'hr executive' || p === 'human resource' ? 'human resources'
+        : p === 'bde' || p === 'sales' ? 'business development'
+        : p;
+
       // 1. Exact match
-      let j = org.jobs.find((x) => x.title.toLowerCase().trim() === p);
+      let j = org.jobs.find((x) => x.title.toLowerCase().trim() === normalizedP || x.title.toLowerCase().trim() === p);
       if (j) return j;
 
       // 2. Substring / contains
       j = org.jobs.find(
         (x) =>
-          x.title.toLowerCase().includes(p) || p.includes(x.title.toLowerCase()),
+          x.title.toLowerCase().includes(normalizedP) ||
+          normalizedP.includes(x.title.toLowerCase()) ||
+          x.title.toLowerCase().includes(p) ||
+          p.includes(x.title.toLowerCase()),
       );
       if (j) return j;
 
       // 3. Word overlap (e.g. "Business Executive" matches "Business Development Executive", "SEO" matches "SEO Executive")
-      const pWords = p
+      const pWords = normalizedP
         .replace(/[^a-z0-9\s]/g, '')
         .split(/\s+/)
         .filter((w) => w.length >= 2);
@@ -524,6 +532,43 @@ export class PublicCareerService {
       .toUpperCase()
       .trim();
 
+    // Extract skills if specified in form fields or infer from matched jobs
+    let initialSkills: string[] = [];
+    const rawSkillsField =
+      raw.skills ||
+      raw['Skills'] ||
+      raw['Key Skills'] ||
+      raw['Skills & Technologies'] ||
+      raw['Technical Skills'] ||
+      raw['Core Competencies'] ||
+      raw['Expertise'];
+
+    if (Array.isArray(rawSkillsField)) {
+      initialSkills = rawSkillsField.map(String).map((s) => s.trim()).filter(Boolean);
+    } else if (typeof rawSkillsField === 'string') {
+      initialSkills = rawSkillsField.split(/[,;\n\r|•]+/).map((s) => s.trim()).filter(Boolean);
+    }
+
+    if (initialSkills.length === 0 && matchedJobs.length > 0) {
+      for (const j of matchedJobs) {
+        const titleLower = j.title.toLowerCase();
+        if (titleLower.includes('content') || titleLower.includes('creator')) {
+          initialSkills.push('Content Creation', 'Social Media Marketing', 'Video Editing', 'Reels');
+        } else if (titleLower.includes('business') || titleLower.includes('bde') || titleLower.includes('sales')) {
+          initialSkills.push('Business Development', 'Client Communication', 'Lead Generation', 'Sales Outreach');
+        } else if (titleLower.includes('human resources') || titleLower.includes('hr') || titleLower.includes('talent')) {
+          initialSkills.push('Human Resources', 'Talent Acquisition', 'Recruitment', 'Employee Engagement', 'HR Operations');
+        } else if (titleLower.includes('seo') || titleLower.includes('search')) {
+          initialSkills.push('SEO', 'Keyword Research', 'Google Analytics', 'Digital Marketing');
+        } else if (titleLower.includes('developer') || titleLower.includes('engineer') || titleLower.includes('software')) {
+          initialSkills.push('JavaScript', 'TypeScript', 'React', 'Node.js');
+        } else if (titleLower.includes('marketing')) {
+          initialSkills.push('Digital Marketing', 'Social Media', 'Content Strategy', 'Brand Outreach');
+        }
+      }
+      initialSkills = Array.from(new Set(initialSkills));
+    }
+
     // 1. Find or create candidate record
     const candidate = await this.candidatesService.findOrCreate(org.id, {
       firstName,
@@ -531,12 +576,12 @@ export class PublicCareerService {
       email,
       phone,
       currentCompany: raw.currentCompany,
-      currentTitle: raw.currentTitle,
+      currentTitle: raw.currentTitle || raw.position || matchedJobs[0]?.title || 'Applicant',
       location: raw.location,
       linkedinUrl: raw.linkedinUrl,
       portfolioUrl: raw.portfolioUrl,
       githubUrl: raw.githubUrl,
-      skills: Array.isArray(raw.skills) ? raw.skills : [],
+      skills: initialSkills,
       source: effectiveSource,
       resumeUrl,
     });
@@ -548,13 +593,13 @@ export class PublicCareerService {
         const app = await this.applicationsService.create(org.id, {
           jobId: targetJob.id,
           candidateId: candidate.id,
-          coverLetter: dto.coverLetter,
+          coverLetter: dto.coverLetter || coverLetter,
           source: effectiveSource,
           utmSource: dto.utmSource,
           utmMedium: dto.utmMedium,
           utmCampaign: dto.utmCampaign,
           metadata: {
-            ...(dto.resumeUrl ? { resumeUrl: dto.resumeUrl } : {}),
+            ...(resumeUrl ? { resumeUrl } : {}),
             appliedVia: effectiveSource,
             sourceChannel: effectiveSource,
             ingestedVia: 'WEBHOOK_API',
