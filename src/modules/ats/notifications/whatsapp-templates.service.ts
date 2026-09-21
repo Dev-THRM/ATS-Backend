@@ -7,6 +7,7 @@ export interface StageUpdateTemplateParams {
   stageName: string;
   rejectionReason?: string;
   customNotes?: string;
+  joiningDate?: string;
   language?: string;
 }
 
@@ -16,7 +17,7 @@ export interface InterviewMessageParams {
   companyName: string;
   interviewTitle: string;
   scheduledAt: Date | string;
-  meetingLink: string;
+  meetingLink?: string | null;
   durationMinutes?: number;
   language?: string;
 }
@@ -64,7 +65,8 @@ export class WhatsAppTemplatesService {
       }
     } else if (normalizedStage.includes('offer')) {
       templateName = 'ats_stage_offer';
-      bodyText = `Hi ${candidateName}, congratulations! 🎉 We are thrilled to extend an offer for the ${jobTitle} position at ${companyName}. Our team will share the formal offer details and next steps shortly.`;
+      const joiningSuffix = params.joiningDate ? ` Your anticipated date of joining is ${params.joiningDate}.` : '';
+      bodyText = `Hi ${candidateName}, congratulations! 🎉 We are thrilled to extend an offer for the ${jobTitle} position at ${companyName}.${joiningSuffix} Our team will share the formal offer details and next steps shortly.`;
     } else if (
       normalizedStage.includes('interview') ||
       normalizedStage.includes('tech round') ||
@@ -96,7 +98,7 @@ export class WhatsAppTemplatesService {
   }
 
   /**
-   * Renders automated WhatsApp confirmation when an interview is scheduled with Google Meet link.
+   * Renders automated WhatsApp confirmation when an interview is scheduled.
    */
   renderInterviewScheduledMessage(params: InterviewMessageParams): RenderedTemplate {
     const {
@@ -116,7 +118,9 @@ export class WhatsAppTemplatesService {
         : new Date(scheduledAt).toUTCString();
 
     const templateName = 'ats_interview_scheduled';
-    const bodyText = `Hi ${candidateName}, your ${interviewTitle} for the ${jobTitle} position at ${companyName} has been scheduled!\n📅 Date & Time (UTC): ${dateStr}\n⏱ Duration: ${durationMinutes} mins\n🔗 Google Meet Link: ${meetingLink}\n\nPlease be online 5 minutes before the start time. Good luck!`;
+    const bodyText = meetingLink
+      ? `Hi ${candidateName}, your ${interviewTitle} for the ${jobTitle} position at ${companyName} has been scheduled!\n📅 Date & Time (UTC): ${dateStr}\n⏱ Duration: ${durationMinutes} mins\n🔗 Google Meet Link: ${meetingLink}\n\nPlease be online 5 minutes before the start time. Good luck!`
+      : `Hi ${candidateName}, your ${interviewTitle} for the ${jobTitle} position at ${companyName} has been scheduled!\n📅 Date & Time (UTC): ${dateStr}\n⏱ Duration: ${durationMinutes} mins\n📍 Venue / Mode: Offline / In-Person\n\nPlease arrive 10 minutes before the scheduled time. Good luck!`;
 
     const parameters: Record<string, string> = {
       '1': candidateName,
@@ -124,7 +128,7 @@ export class WhatsAppTemplatesService {
       '3': jobTitle,
       '4': companyName,
       '5': dateStr,
-      '6': meetingLink,
+      '6': meetingLink || 'In-Person (Office)',
     };
 
     return {
@@ -155,7 +159,9 @@ export class WhatsAppTemplatesService {
         : new Date(scheduledAt).toUTCString();
 
     const templateName = 'ats_interview_reminder';
-    const bodyText = `Hi ${candidateName}, this is a friendly reminder that your ${interviewTitle} for ${jobTitle} at ${companyName} is tomorrow at ${dateStr}!\n🔗 Google Meet Link: ${meetingLink}\n\nWe look forward to speaking with you.`;
+    const bodyText = meetingLink
+      ? `Hi ${candidateName}, this is a friendly reminder that your ${interviewTitle} for ${jobTitle} at ${companyName} is tomorrow at ${dateStr}!\n🔗 Google Meet Link: ${meetingLink}\n\nWe look forward to speaking with you.`
+      : `Hi ${candidateName}, this is a friendly reminder that your ${interviewTitle} for ${jobTitle} at ${companyName} is tomorrow at ${dateStr}!\n📍 Venue / Mode: Offline / In-Person\n\nWe look forward to meeting with you at our office.`;
 
     const parameters: Record<string, string> = {
       '1': candidateName,
@@ -163,7 +169,7 @@ export class WhatsAppTemplatesService {
       '3': jobTitle,
       '4': companyName,
       '5': dateStr,
-      '6': meetingLink,
+      '6': meetingLink || 'In-Person (Office)',
     };
 
     return {
