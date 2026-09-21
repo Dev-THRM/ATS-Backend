@@ -34,7 +34,7 @@ export class CreateInterviewDto {
 
   @IsEnum(InterviewType)
   @IsOptional()
-  type?: InterviewType = InterviewType.TECHNICAL;
+  type?: InterviewType = InterviewType.SCREENING;
 
   @IsDateString()
   @IsNotEmpty()
