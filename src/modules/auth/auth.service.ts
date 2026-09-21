@@ -11,6 +11,7 @@ import {
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import bcrypt from 'bcryptjs';
+import sharp from 'sharp';
 import { AppPlan, SystemRoleType } from '@prisma/client';
 import { PrismaService } from '../shared/prisma/prisma.service.js';
 import { RegisterDto } from './dto/register.dto.js';
@@ -680,13 +681,23 @@ export class AuthService {
       throw new BadRequestException('No logo image file uploaded');
     }
 
+    let processedBuffer = file.buffer;
+    try {
+      const trimmed = await sharp(file.buffer).trim({ threshold: 15 }).toBuffer();
+      if (trimmed && trimmed.length > 0) {
+        processedBuffer = trimmed;
+      }
+    } catch {
+      processedBuffer = file.buffer;
+    }
+
     const ext = file.originalname ? file.originalname.split('.').pop() : 'png';
     const key = `logos/${user.organizationId}-${Date.now()}.${ext}`;
 
     const storage = this.storageService || new StorageService(this.configService);
     const { url } = await storage.uploadBuffer({
       key,
-      buffer: file.buffer,
+      buffer: processedBuffer,
       contentType: file.mimetype || 'image/png',
     });
 
