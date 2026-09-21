@@ -7,6 +7,7 @@ export interface EmailTemplateParams {
   stageName?: string;
   rejectionReason?: string | null;
   customNotes?: string | null;
+  joiningDate?: string | null;
 }
 
 export interface RenderedEmail {
@@ -169,8 +170,27 @@ ${companyName}`;
    * Template: Candidate clears HR round -> Offer Template (Congratulations!)
    */
   renderOfferEmail(params: EmailTemplateParams): RenderedEmail {
-    const { candidateName, jobTitle, companyName, customNotes } = params;
+    const { candidateName, jobTitle, companyName, customNotes, joiningDate } = params;
     const subject = `🎉 Congratulations! Job Offer for ${jobTitle} at ${companyName}`;
+
+    let formattedJoiningDate = '';
+    if (joiningDate) {
+      try {
+        const d = new Date(joiningDate);
+        if (!isNaN(d.getTime())) {
+          formattedJoiningDate = d.toLocaleDateString('en-US', {
+            weekday: 'long',
+            year: 'numeric',
+            month: 'long',
+            day: 'numeric',
+          });
+        } else {
+          formattedJoiningDate = joiningDate;
+        }
+      } catch {
+        formattedJoiningDate = joiningDate;
+      }
+    }
 
     const text = `Dear ${candidateName},
 
@@ -180,7 +200,9 @@ We are thrilled to inform you that you have successfully cleared the HR and inte
 
 The leadership and interview team were very impressed with your credentials, skills, and conversations throughout the hiring process.
 
-We are delighted to extend this formal offer of employment to you. Our Human Resources team is currently finalizing your official offer letter and compensation package. We will share the paperwork and next onboarding steps with you shortly.
+We are delighted to extend this formal offer of employment to you. Our Human Resources team is currently finalizing your official offer letter and compensation package.${formattedJoiningDate ? `\n\n📅 Expected Date of Joining: ${formattedJoiningDate}` : ''}
+
+We will share the paperwork and next onboarding steps with you shortly.
 
 ${customNotes ? `Note from HR: ${customNotes}\n\n` : ''}
 Once again, congratulations! We are excited about the prospect of having you on our team.
@@ -235,6 +257,18 @@ ${companyName}`;
                     <div style="font-size: 12px; font-weight: 800; color: #15803d; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 6px;">Offer of Employment</div>
                     <div style="font-size: 18px; font-weight: 900; color: #065f46; margin-bottom: 4px;">${jobTitle}</div>
                     <div style="font-size: 13px; font-weight: 600; color: #16a34a;">Organization: ${companyName}</div>
+
+                    ${
+                      formattedJoiningDate
+                        ? `
+                    <div style="margin-top: 14px; padding: 14px 16px; background-color: #ffffff; border: 1.5px solid #86efac; border-radius: 10px; box-shadow: 0 1px 2px rgba(0,0,0,0.04);">
+                      <div style="font-size: 11px; font-weight: 800; color: #15803d; text-transform: uppercase; letter-spacing: 0.05em;">Expected Date of Joining</div>
+                      <div style="font-size: 17px; font-weight: 900; color: #065f46; margin-top: 3px;">📅 ${formattedJoiningDate}</div>
+                      <div style="font-size: 12px; color: #16a34a; margin-top: 3px;">Please mark this date on your calendar. Your orientation and onboarding will commence on this day.</div>
+                    </div>`
+                        : ''
+                    }
+
                     <div style="margin-top: 12px; padding-top: 12px; border-top: 1px dashed #bbf7d0; font-size: 13px; color: #15803d; line-height: 1.5;">
                       ✅ <strong>Next Step:</strong> Our HR operations team is preparing your official offer letter and compensation schedule. You will receive the documents shortly for review and electronic signature.
                     </div>
@@ -483,4 +517,227 @@ ${companyName}`;
 
     return { subject, html, text };
   }
+
+  /**
+   * Template: Candidate invited to an interview (Online Google Meet or Offline In-Person)
+   */
+  renderInterviewInvitationEmail(params: InterviewEmailParams): RenderedEmail {
+    const {
+      candidateName,
+      jobTitle,
+      companyName,
+      interviewTitle,
+      scheduledAt,
+      durationMinutes = 45,
+      meetingLink,
+      locationNotes,
+    } = params;
+
+    const dateObj = scheduledAt instanceof Date ? scheduledAt : new Date(scheduledAt);
+    const dateStr = !isNaN(dateObj.getTime())
+      ? dateObj.toLocaleString('en-US', {
+          weekday: 'long',
+          year: 'numeric',
+          month: 'long',
+          day: 'numeric',
+          hour: '2-digit',
+          minute: '2-digit',
+          timeZoneName: 'short',
+        })
+      : String(scheduledAt);
+
+    const isOnline = Boolean(meetingLink && meetingLink.trim());
+    const subject = `Interview Invitation: ${interviewTitle} - ${jobTitle} at ${companyName}`;
+
+    const text = isOnline
+      ? `Dear ${candidateName},
+
+We are pleased to invite you for the ${interviewTitle} for the ${jobTitle} position at ${companyName}.
+
+Interview Details:
+- Session: ${interviewTitle}
+- Position: ${jobTitle}
+- Date & Time: ${dateStr}
+- Duration: ${durationMinutes} minutes
+- Format: Online Video Meeting
+- Google Meet Link: ${meetingLink}
+${locationNotes ? `- Instructions: ${locationNotes}\n` : ''}
+Please join 5 minutes before the scheduled time with your camera and microphone enabled.
+
+If you have any questions or need to reschedule, please reply directly to this email.
+
+Best regards,
+Talent Acquisition Team
+${companyName}`
+      : `Dear ${candidateName},
+
+We are pleased to invite you for an in-person interview for the ${jobTitle} position at ${companyName}.
+
+Interview Details:
+- Session: ${interviewTitle}
+- Position: ${jobTitle}
+- Date & Time: ${dateStr}
+- Duration: ${durationMinutes} minutes
+- Format: Offline / In-Person
+${locationNotes ? `- Venue / Instructions: ${locationNotes}\n` : '- Venue: Please report to the office reception 10 minutes prior to the scheduled time.\n'}
+Please arrive 10 minutes before the scheduled time with your ID and a copy of your resume.
+
+If you have any questions or need to reschedule, please reply directly to this email.
+
+Best regards,
+Talent Acquisition Team
+${companyName}`;
+
+    const html = `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>${subject}</title>
+</head>
+<body style="margin: 0; padding: 0; background-color: #f8fafc; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; color: #1e293b;">
+  <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color: #f8fafc; padding: 32px 16px;">
+    <tr>
+      <td align="center">
+        <table width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width: 600px; background-color: #ffffff; border-radius: 16px; border: 1px solid #e2e8f0; overflow: hidden; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05);">
+          <!-- Header -->
+          <tr>
+            <td style="background: linear-gradient(135deg, #2563eb, #1d4ed8); padding: 32px 28px; text-align: left;">
+              <h2 style="margin: 0; color: #ffffff; font-size: 22px; font-weight: 800; letter-spacing: -0.02em;">
+                ${companyName}
+              </h2>
+              <p style="margin: 6px 0 0 0; color: #dbeafe; font-size: 14px; font-weight: 500;">
+                Interview Invitation
+              </p>
+            </td>
+          </tr>
+
+          <!-- Body -->
+          <tr>
+            <td style="padding: 32px 28px;">
+              <p style="margin: 0 0 16px 0; font-size: 15px; line-height: 1.6; color: #334155;">
+                Dear <strong>${candidateName}</strong>,
+              </p>
+              <p style="margin: 0 0 20px 0; font-size: 15px; line-height: 1.6; color: #334155;">
+                We are pleased to invite you for the <strong>${interviewTitle}</strong> for the <strong>${jobTitle}</strong> position at <strong>${companyName}</strong>.
+              </p>
+
+              <!-- Session Details Card -->
+              <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; margin: 20px 0;">
+                <tr>
+                  <td style="padding: 20px;">
+                    <table width="100%" cellpadding="6" cellspacing="0" border="0">
+                      <tr>
+                        <td width="30%" style="font-size: 12px; font-weight: 700; color: #64748b; text-transform: uppercase;">Session</td>
+                        <td style="font-size: 14px; font-weight: 700; color: #0f172a;">${interviewTitle}</td>
+                      </tr>
+                      <tr>
+                        <td style="font-size: 12px; font-weight: 700; color: #64748b; text-transform: uppercase;">Position</td>
+                        <td style="font-size: 14px; color: #334155;">${jobTitle}</td>
+                      </tr>
+                      <tr>
+                        <td style="font-size: 12px; font-weight: 700; color: #64748b; text-transform: uppercase;">Date & Time</td>
+                        <td style="font-size: 14px; font-weight: 600; color: #2563eb;">${dateStr}</td>
+                      </tr>
+                      <tr>
+                        <td style="font-size: 12px; font-weight: 700; color: #64748b; text-transform: uppercase;">Duration</td>
+                        <td style="font-size: 14px; color: #334155;">${durationMinutes} minutes</td>
+                      </tr>
+                      <tr>
+                        <td style="font-size: 12px; font-weight: 700; color: #64748b; text-transform: uppercase;">Format</td>
+                        <td style="font-size: 14px; font-weight: 700; color: ${isOnline ? '#2563eb' : '#059669'};">
+                          ${isOnline ? 'Online (Google Meet)' : 'Offline / In-Person'}
+                        </td>
+                      </tr>
+                      ${
+                        isOnline && meetingLink
+                          ? `
+                      <tr>
+                        <td style="font-size: 12px; font-weight: 700; color: #64748b; text-transform: uppercase;">Meeting Link</td>
+                        <td style="font-size: 14px; word-break: break-all;">
+                          <a href="${meetingLink}" target="_blank" style="color: #2563eb; font-weight: 600; text-decoration: underline;">
+                            ${meetingLink}
+                          </a>
+                        </td>
+                      </tr>
+                      `
+                          : ''
+                      }
+                      ${
+                        locationNotes
+                          ? `
+                      <tr>
+                        <td style="font-size: 12px; font-weight: 700; color: #64748b; text-transform: uppercase;">Instructions</td>
+                        <td style="font-size: 13px; color: #475569; line-height: 1.5;">${locationNotes}</td>
+                      </tr>
+                      `
+                          : ''
+                      }
+                    </table>
+                  </td>
+                </tr>
+              </table>
+
+              ${
+                isOnline && meetingLink
+                  ? `
+              <div style="text-align: center; margin: 28px 0;">
+                <a href="${meetingLink}" target="_blank" style="background-color: #2563eb; color: #ffffff; padding: 12px 28px; border-radius: 10px; font-size: 14px; font-weight: 700; text-decoration: none; display: inline-block; box-shadow: 0 2px 4px rgba(37,99,235,0.2);">
+                  Join Video Meeting
+                </a>
+              </div>
+              <p style="margin: 0 0 16px 0; font-size: 13px; color: #64748b; text-align: center;">
+                Please ensure you have a working camera and microphone before joining.
+              </p>
+              `
+                  : `
+              <div style="background-color: #ecfdf5; border: 1px solid #a7f3d0; border-radius: 10px; padding: 14px 18px; margin: 20px 0;">
+                <p style="margin: 0; font-size: 13px; color: #065f46; line-height: 1.5;">
+                  <strong>In-Person Reporting:</strong> Please arrive 10 minutes prior to the scheduled time with your photo ID and updated resume.
+                </p>
+              </div>
+              `
+              }
+
+              <p style="margin: 20px 0 0 0; font-size: 14px; line-height: 1.6; color: #475569;">
+                If you have any questions or need to reschedule, please feel free to reply directly to this email. We look forward to meeting you!
+              </p>
+
+              <div style="margin-top: 32px; padding-top: 20px; border-top: 1px solid #f1f5f9;">
+                <p style="margin: 0; font-size: 14px; font-weight: 700; color: #0f172a;">Talent Acquisition Team</p>
+                <p style="margin: 2px 0 0 0; font-size: 13px; color: #64748b;">${companyName}</p>
+              </div>
+            </td>
+          </tr>
+
+          <!-- Footer -->
+          <tr>
+            <td style="background-color: #f8fafc; padding: 20px 28px; border-top: 1px solid #e2e8f0; text-align: center;">
+              <p style="margin: 0; font-size: 12px; color: #94a3b8; line-height: 1.5;">
+                &copy; ${new Date().getFullYear()} ${companyName}. All rights reserved.<br>
+                Official communication regarding your job application.
+              </p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`;
+
+    return { subject, html, text };
+  }
+}
+
+export interface InterviewEmailParams {
+  candidateName: string;
+  jobTitle: string;
+  companyName: string;
+  interviewTitle: string;
+  scheduledAt: Date | string;
+  durationMinutes?: number;
+  meetingLink?: string | null;
+  locationNotes?: string | null;
 }
