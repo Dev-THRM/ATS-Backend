@@ -112,6 +112,48 @@ describe('EmailTemplatesService & EmailService', () => {
     });
   });
 
+  describe('renderInterviewInvitationEmail', () => {
+    it('should generate online interview email with Google Meet link', () => {
+      const email = templatesService.renderInterviewInvitationEmail({
+        candidateName: 'Sakshi Baheti',
+        jobTitle: 'Full Stack Engineer',
+        companyName: 'Acme Corp',
+        interviewTitle: 'Technical Round 1',
+        scheduledAt: new Date('2026-09-25T11:00:00Z'),
+        durationMinutes: 45,
+        meetingLink: 'https://meet.google.com/abc-defg-hij',
+        locationNotes: 'Please join with code editor ready.',
+      });
+
+      expect(email.subject).toContain('Interview Invitation: Technical Round 1');
+      expect(email.text).toContain('Sakshi Baheti');
+      expect(email.text).toContain('Online Video Meeting');
+      expect(email.text).toContain('https://meet.google.com/abc-defg-hij');
+      expect(email.html).toContain('Join Video Meeting');
+      expect(email.html).toContain('https://meet.google.com/abc-defg-hij');
+    });
+
+    it('should generate offline interview email with in-person reporting details', () => {
+      const email = templatesService.renderInterviewInvitationEmail({
+        candidateName: 'Rohan Sharma',
+        jobTitle: 'Sales Executive',
+        companyName: 'Acme Corp',
+        interviewTitle: 'In-Person HR Round',
+        scheduledAt: new Date('2026-09-25T14:00:00Z'),
+        durationMinutes: 30,
+        meetingLink: null,
+        locationNotes: 'Report to 4th floor front desk.',
+      });
+
+      expect(email.subject).toContain('Interview Invitation: In-Person HR Round');
+      expect(email.text).toContain('Rohan Sharma');
+      expect(email.text).toContain('Offline / In-Person');
+      expect(email.text).toContain('Report to 4th floor front desk.');
+      expect(email.html).toContain('Offline / In-Person');
+      expect(email.html).toContain('In-Person Reporting');
+    });
+  });
+
   describe('EmailService', () => {
     it('should run in simulated mode when SMTP_PASS is unset and return success', async () => {
       const result = await emailService.sendMail({
