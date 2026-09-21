@@ -376,6 +376,20 @@ export class CandidatesService {
               applications: true,
             },
           },
+          applications: {
+            take: 3,
+            orderBy: { appliedAt: 'desc' },
+            select: {
+              id: true,
+              metadata: true,
+              job: {
+                select: {
+                  id: true,
+                  title: true,
+                },
+              },
+            },
+          },
         },
       }),
     ]);
@@ -461,10 +475,11 @@ export class CandidatesService {
       }
     }
 
+    const { jobId, jobIds, positions, coverLetter, ...candidateData } = dto as any;
     return this.prisma.candidate.update({
       where: { id: candidateId },
       data: {
-        ...dto,
+        ...candidateData,
         ...(email && { email }),
       },
     });
@@ -553,6 +568,7 @@ export class CandidatesService {
               ...(item.currentTitle ? { currentTitle: item.currentTitle } : {}),
               ...(item.location ? { location: item.location } : {}),
               ...(item.linkedinUrl ? { linkedinUrl: item.linkedinUrl } : {}),
+              ...(item.resumeUrl ? { resumeUrl: item.resumeUrl } : {}),
               skills: mergedSkills,
               tags: mergedTags,
             },
@@ -571,6 +587,7 @@ export class CandidatesService {
               location: item.location || null,
               source,
               linkedinUrl: item.linkedinUrl || null,
+              resumeUrl: item.resumeUrl || null,
               skills,
               tags: [...(item.tags || []), ...(dto.tags || [])],
             },
@@ -601,9 +618,20 @@ export class CandidatesService {
                 status: 'ACTIVE',
                 source,
                 utmSource: 'bulk_csv_import',
+                ...(item.resumeUrl ? { metadata: { resumeUrl: item.resumeUrl } } : {}),
               },
             });
             appsCreatedCount++;
+          } else if (item.resumeUrl) {
+            const appMeta = (existingApp.metadata as Record<string, any>) || {};
+            if (!appMeta.resumeUrl) {
+              await this.prisma.application.update({
+                where: { id: existingApp.id },
+                data: {
+                  metadata: { ...appMeta, resumeUrl: item.resumeUrl },
+                },
+              });
+            }
           }
         }
       } catch (err: any) {
