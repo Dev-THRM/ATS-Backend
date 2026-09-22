@@ -58,24 +58,17 @@ export class AtsDashboardService {
           scheduledAt: { gte: now },
         },
       }),
-      // 8. Applications grouped by current stage
-      this.prisma.application.findMany({
+      // 8. Applications aggregated by current stage via SQL GROUP BY
+      this.prisma.application.groupBy({
+        by: ['currentStageId'],
         where: { organizationId },
-        select: {
-          currentStage: {
-            select: {
-              name: true,
-            },
-          },
-          status: true,
-        },
+        _count: { _all: true },
       }),
-      // 9. Candidates grouped by source
-      this.prisma.candidate.findMany({
+      // 9. Candidates aggregated by source via SQL GROUP BY
+      this.prisma.candidate.groupBy({
+        by: ['source'],
         where: { organizationId },
-        select: {
-          source: true,
-        },
+        _count: { _all: true },
       }),
       // 10. Top 5 recent applications
       this.prisma.application.findMany({
@@ -143,30 +136,34 @@ export class AtsDashboardService {
       }),
     ]);
 
-    // Aggregate pipeline funnel stage counts
-    const stageCounts: Record<string, number> = {};
-    for (const app of applicationsByStage) {
-      const stageName = app.currentStage?.name || 'Applied';
-      stageCounts[stageName] = (stageCounts[stageName] || 0) + 1;
-    }
+    // Resolve stage names for the grouped stages efficiently
+    const stageIds = applicationsByStage
+      .map((item) => item.currentStageId)
+      .filter((id): id is string => Boolean(id));
 
-    const pipelineFunnel = Object.entries(stageCounts).map(([stage, count]) => ({
-      stage,
-      count,
+    const stageRecords = stageIds.length > 0
+      ? await this.prisma.pipelineStage.findMany({
+          where: { id: { in: stageIds } },
+          select: { id: true, name: true },
+        })
+      : [];
+    const stageNameMap = new Map(stageRecords.map((s) => [s.id, s.name]));
+
+    const pipelineFunnel = applicationsByStage.map((group) => ({
+      stage: stageNameMap.get(group.currentStageId) || 'Applied',
+      count: group._count._all,
     }));
 
-    // Aggregate candidate source distribution
-    const sourceCounts: Record<string, number> = {};
-    for (const cand of candidatesBySource) {
-      const src = cand.source || 'CAREER_PORTAL';
-      sourceCounts[src] = (sourceCounts[src] || 0) + 1;
-    }
-
-    const sourcesBreakdown = Object.entries(sourceCounts).map(([source, count]) => ({
-      source,
-      count,
-      percentage: totalCandidates > 0 ? Math.round((count / totalCandidates) * 100) : 0,
-    }));
+    // Format source breakdown using database-aggregated counts
+    const sourcesBreakdown = candidatesBySource.map((group) => {
+      const source = group.source || 'CAREER_PORTAL';
+      const count = group._count._all;
+      return {
+        source,
+        count,
+        percentage: totalCandidates > 0 ? Math.round((count / totalCandidates) * 100) : 0,
+      };
+    });
 
     return {
       kpis: {

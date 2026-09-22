@@ -68,7 +68,7 @@ export class EmailService {
     const from =
       options.from ||
       process.env.SMTP_FROM ||
-      `THRM Digital Marketing <${process.env.SMTP_USER || 'dev@thrmdigitalmarketing.in'}>`;
+      `ATS Recruitment <${process.env.SMTP_USER || 'no-reply@atsplatform.com'}>`;
 
     if (!options.to || !options.to.includes('@')) {
       this.logger.warn(`Invalid or missing recipient email address: "${options.to}"`);

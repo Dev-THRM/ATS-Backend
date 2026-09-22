@@ -197,7 +197,7 @@ export class CandidatesService {
           where: { id: organizationId },
           select: { name: true },
         });
-        const companyName = org?.name || 'THRM Digital Marketing Agency';
+        const companyName = org?.name || 'Hiring Organization';
 
         const notificationPayload = {
           applicationId: app.id,
@@ -230,7 +230,7 @@ export class CandidatesService {
         where: { id: organizationId },
         select: { name: true },
       });
-      const companyName = org?.name || 'THRM Digital Marketing Agency';
+      const companyName = org?.name || 'Hiring Organization';
 
       const talentPoolPayload = {
         applicationId: '',

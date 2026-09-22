@@ -54,6 +54,7 @@ describe('AuthService', () => {
       },
       user: {
         findUnique: vi.fn(),
+        findFirst: vi.fn(),
         findMany: vi.fn(),
         update: vi.fn(),
       },
@@ -193,4 +194,57 @@ describe('AuthService', () => {
       expect(result.organization.activePlans).toContain(AppPlan.ATS);
     });
   });
+
+  describe('forgotPassword', () => {
+    it('should return generic success message even if user does not exist', async () => {
+      prisma.user.findFirst.mockResolvedValue(null);
+
+      const res = await service.forgotPassword({ email: 'nonexistent@example.com' });
+      expect(res.message).toContain('password reset instructions have been dispatched');
+    });
+
+    it('should generate reset token and dispatch email if user exists', async () => {
+      prisma.user.findFirst.mockResolvedValue({
+        ...mockUser,
+        organization: { name: 'Acme Corp' },
+      });
+      prisma.user.update.mockResolvedValue(mockUser);
+
+      const res = await service.forgotPassword({ email: 'owner@acme.com' });
+      expect(res.message).toContain('password reset instructions have been dispatched');
+      expect(prisma.user.update).toHaveBeenCalled();
+    });
+  });
+
+  describe('resetPassword', () => {
+    it('should throw BadRequestException if token is invalid or expired', async () => {
+      prisma.user.findFirst.mockResolvedValue(null);
+
+      await expect(
+        service.resetPassword({ token: 'bad-token', newPassword: 'NewPassword123!' }),
+      ).rejects.toThrow();
+    });
+
+    it('should reset password, invalidate tokens, and return success message', async () => {
+      prisma.user.findFirst.mockResolvedValue(mockUser);
+      prisma.user.update.mockResolvedValue(mockUser);
+
+      const res = await service.resetPassword({
+        token: 'valid-token',
+        newPassword: 'NewPassword123!',
+      });
+      expect(res.message).toContain('successfully reset');
+      expect(prisma.user.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: mockUser.id },
+          data: expect.objectContaining({
+            resetPasswordToken: null,
+            resetPasswordExpires: null,
+            refreshTokenHash: null,
+          }),
+        }),
+      );
+    });
+  });
 });
+

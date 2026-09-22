@@ -212,7 +212,7 @@ export class ApplicationsService {
 
     // Dispatch candidate application receipt notification
     const companyName =
-      (application.job as any)?.organization?.name || 'THRM Digital Marketing Agency';
+      (application.job as any)?.organization?.name || 'Hiring Organization';
     const notificationPayload = {
       applicationId: application.id,
       candidateId,
@@ -460,7 +460,7 @@ export class ApplicationsService {
 
     // Dispatch candidate status transition notification
     const companyName =
-      (updated.job as any)?.organization?.name || 'THRM Digital Marketing Agency';
+      (updated.job as any)?.organization?.name || 'Hiring Organization';
     const notificationPayload = {
       applicationId: updated.id,
       candidateId: updated.candidateId,
@@ -532,7 +532,7 @@ export class ApplicationsService {
 
       if (sendEmail) {
         const companyName =
-          (application.job as any)?.organization?.name || 'THRM Digital Marketing Agency';
+          (application.job as any)?.organization?.name || 'Hiring Organization';
         const notificationPayload = {
           applicationId: application.id,
           candidateId: application.candidateId,
@@ -746,7 +746,7 @@ export class ApplicationsService {
 
     // Dispatch candidate status transition notification
     const companyName =
-      (updated.job as any)?.organization?.name || 'THRM Digital Marketing Agency';
+      (updated.job as any)?.organization?.name || 'Hiring Organization';
     const notificationPayload = {
       applicationId: updated.id,
       candidateId: updated.candidateId,

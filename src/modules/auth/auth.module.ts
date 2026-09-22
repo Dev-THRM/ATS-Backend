@@ -8,6 +8,7 @@ import { AuthController } from './auth.controller.js';
 import { JwtStrategy } from './strategies/jwt.strategy.js';
 import { JwtAuthGuard } from './guards/jwt-auth.guard.js';
 import { SharedModule } from '../shared/shared.module.js';
+import { EmailService } from '../ats/notifications/email.service.js';
 
 @Module({
   imports: [
@@ -17,7 +18,8 @@ import { SharedModule } from '../shared/shared.module.js';
     JwtModule.register({}),
   ],
   controllers: [AuthController],
-  providers: [AuthService, JwtStrategy, JwtAuthGuard, Reflector],
+  providers: [AuthService, JwtStrategy, JwtAuthGuard, Reflector, EmailService],
   exports: [AuthService, JwtAuthGuard, JwtModule, PassportModule],
 })
 export class AuthModule {}
+

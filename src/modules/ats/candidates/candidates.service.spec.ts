@@ -20,6 +20,12 @@ describe('CandidatesService', () => {
         update: vi.fn(),
         delete: vi.fn(),
       },
+      job: {
+        findMany: vi.fn().mockResolvedValue([]),
+      },
+      organization: {
+        findUnique: vi.fn().mockResolvedValue({ name: 'Acme Corp' }),
+      },
     } as unknown as PrismaService;
 
     service = new CandidatesService(prisma);

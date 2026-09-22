@@ -26,6 +26,8 @@ import { RegisterDto } from './dto/register.dto.js';
 import { LoginDto } from './dto/login.dto.js';
 import { RefreshTokenDto } from './dto/refresh-token.dto.js';
 import { UpdateOrganizationDto } from './dto/update-organization.dto.js';
+import { ForgotPasswordDto } from './dto/forgot-password.dto.js';
+import { ResetPasswordDto } from './dto/reset-password.dto.js';
 import { Public } from '../../common/decorators/public.decorator.js';
 import { CurrentUser } from '../../common/decorators/current-user.decorator.js';
 import { JwtAuthGuard } from './guards/jwt-auth.guard.js';
@@ -33,6 +35,7 @@ import {
   AuthResponse,
   AuthTokens,
   UserSummary,
+  OrganizationDetail,
 } from './interfaces/auth-response.interface.js';
 
 @ApiTags('Authentication & Organization')
@@ -100,6 +103,39 @@ export class AuthController {
   }
 
   /**
+   * Request password reset instructions
+   * Example: POST /api/v1/auth/forgot-password
+   */
+  @Public()
+  @Post('forgot-password')
+  @Throttle({ default: { limit: 5, ttl: 60000 } })
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Request password reset token sent via email' })
+  @ApiResponse({ status: 200, description: 'Reset request received; instructions dispatched if account exists.' })
+  async forgotPassword(
+    @Body() dto: ForgotPasswordDto,
+  ): Promise<{ message: string }> {
+    return this.authService.forgotPassword(dto);
+  }
+
+  /**
+   * Reset user password using token
+   * Example: POST /api/v1/auth/reset-password
+   */
+  @Public()
+  @Post('reset-password')
+  @Throttle({ default: { limit: 5, ttl: 60000 } })
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Reset account password with a valid reset token' })
+  @ApiResponse({ status: 200, description: 'Password reset successful.' })
+  @ApiResponse({ status: 400, description: 'Invalid or expired reset token.' })
+  async resetPassword(
+    @Body() dto: ResetPasswordDto,
+  ): Promise<{ message: string }> {
+    return this.authService.resetPassword(dto);
+  }
+
+  /**
    * Rotate and issue fresh Access and Refresh Token pair
    * Example: POST /api/v1/auth/refresh?refreshToken=...
    */
@@ -160,7 +196,7 @@ export class AuthController {
   @ApiOperation({ summary: 'Get current tenant organization profile' })
   async getOrganization(
     @CurrentUser('userId') userId: string,
-  ): Promise<any> {
+  ): Promise<OrganizationDetail> {
     return this.authService.getOrganization(userId);
   }
 
@@ -174,7 +210,7 @@ export class AuthController {
   async updateOrganization(
     @CurrentUser('userId') userId: string,
     @Body() dto: UpdateOrganizationDto,
-  ): Promise<any> {
+  ): Promise<OrganizationDetail> {
     return this.authService.updateOrganization(userId, dto);
   }
 

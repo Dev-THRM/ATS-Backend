@@ -23,6 +23,24 @@ export interface UserSummary {
   };
 }
 
+export interface OrganizationDetail {
+  id: string;
+  name: string;
+  slug: string;
+  logoUrl: string | null;
+  website: string | null;
+  isVerified: boolean;
+  verifiedDomain: string | null;
+  sourcingChannels: string[];
+  createdAt: Date;
+  updatedAt: Date;
+  _count?: {
+    users: number;
+    jobs: number;
+    candidates: number;
+  };
+}
+
 export interface AuthTokens {
   accessToken: string;
   refreshToken: string;
@@ -33,3 +51,4 @@ export interface AuthResponse {
   user: UserSummary;
   tokens: AuthTokens;
 }
+

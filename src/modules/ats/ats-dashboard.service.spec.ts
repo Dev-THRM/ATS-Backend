@@ -15,10 +15,9 @@ describe('AtsDashboardService', () => {
       },
       candidate: {
         count: vi.fn().mockResolvedValue(25),
-        findMany: vi.fn().mockResolvedValue([
-          { source: 'CAREER_PORTAL' },
-          { source: 'CAREER_PORTAL' },
-          { source: 'LINKEDIN' },
+        groupBy: vi.fn().mockResolvedValue([
+          { source: 'CAREER_PORTAL', _count: { _all: 2 } },
+          { source: 'LINKEDIN', _count: { _all: 1 } },
         ]),
       },
       application: {
@@ -28,31 +27,30 @@ describe('AtsDashboardService', () => {
           if (where.status === 'REJECTED') return Promise.resolve(7);
           return Promise.resolve(25);
         }),
-        findMany: vi.fn().mockImplementation(({ take }) => {
-          if (take === 5) {
-            return Promise.resolve([
-              {
-                id: 'app-1',
-                appliedAt: new Date(),
-                status: 'ACTIVE',
-                atsScore: 85,
-                candidate: {
-                  id: 'c-1',
-                  firstName: 'Maria',
-                  lastName: 'Silva',
-                  email: 'maria@example.com',
-                },
-                job: { id: 'j-1', title: 'Backend Dev', department: 'Engineering' },
-                currentStage: { id: 'st-1', name: 'Interview' },
-              },
-            ]);
-          }
-          return Promise.resolve([
-            { currentStage: { name: 'Applied' }, status: 'ACTIVE' },
-            { currentStage: { name: 'Interview' }, status: 'ACTIVE' },
-            { currentStage: { name: 'Interview' }, status: 'ACTIVE' },
-          ]);
-        }),
+        groupBy: vi.fn().mockResolvedValue([
+          { currentStageId: 'st-1', _count: { _all: 2 } },
+        ]),
+        findMany: vi.fn().mockResolvedValue([
+          {
+            id: 'app-1',
+            appliedAt: new Date(),
+            status: 'ACTIVE',
+            atsScore: 85,
+            candidate: {
+              id: 'c-1',
+              firstName: 'Maria',
+              lastName: 'Silva',
+              email: 'maria@example.com',
+            },
+            job: { id: 'j-1', title: 'Backend Dev', department: 'Engineering' },
+            currentStage: { id: 'st-1', name: 'Interview' },
+          },
+        ]),
+      },
+      pipelineStage: {
+        findMany: vi.fn().mockResolvedValue([
+          { id: 'st-1', name: 'Interview' },
+        ]),
       },
       interview: {
         count: vi.fn().mockResolvedValue(4),

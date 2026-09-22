@@ -13,20 +13,25 @@ import { ConfigService } from '@nestjs/config';
 import bcrypt from 'bcryptjs';
 import sharp from 'sharp';
 import { AppPlan, SystemRoleType } from '@prisma/client';
+import crypto from 'crypto';
 import { PrismaService } from '../shared/prisma/prisma.service.js';
 import { RegisterDto } from './dto/register.dto.js';
 import { LoginDto } from './dto/login.dto.js';
 import { RefreshTokenDto } from './dto/refresh-token.dto.js';
 import { UpdateOrganizationDto } from './dto/update-organization.dto.js';
+import { ForgotPasswordDto } from './dto/forgot-password.dto.js';
+import { ResetPasswordDto } from './dto/reset-password.dto.js';
 import {
   AuthResponse,
   AuthTokens,
   UserSummary,
+  OrganizationDetail,
 } from './interfaces/auth-response.interface.js';
 import {
   JwtPayload,
   JwtRefreshPayload,
 } from './interfaces/jwt-payload.interface.js';
+import { EmailService } from '../ats/notifications/email.service.js';
 
 import { StorageService } from '../shared/storage/storage.service.js';
 
@@ -49,6 +54,7 @@ export class AuthService {
     @Inject(JwtService) private readonly jwtService: JwtService,
     @Inject(ConfigService) private readonly configService: ConfigService,
     @Optional() @Inject(StorageService) private readonly storageService?: StorageService,
+    @Optional() @Inject(EmailService) private readonly emailService?: EmailService,
   ) {}
 
   /**
@@ -446,7 +452,7 @@ export class AuthService {
   async getMe(
     userId: string,
     options?: { includePermissions?: boolean; includeOrg?: boolean },
-  ): Promise<any> {
+  ): Promise<UserSummary> {
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
       include: {
@@ -524,9 +530,27 @@ export class AuthService {
    * Format UserSummary object.
    */
   private formatUserSummary(
-    user: any,
-    role: any,
-    organization: any,
+    user: {
+      id: string;
+      email: string;
+      firstName: string;
+      lastName: string;
+      avatarUrl: string | null;
+    },
+    role: {
+      id: string;
+      name: string;
+      type: string;
+      permissions: string[];
+    },
+    organization: {
+      id: string;
+      name: string;
+      slug: string;
+      logoUrl: string | null;
+      website: string | null;
+      sourcingChannels: string[];
+    },
     activePlans: AppPlan[],
   ): UserSummary {
     return {
@@ -556,7 +580,7 @@ export class AuthService {
   /**
    * Get organization details for the authenticated user's organization.
    */
-  async getOrganization(userId: string): Promise<any> {
+  async getOrganization(userId: string): Promise<OrganizationDetail> {
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
       select: { organizationId: true },
@@ -591,7 +615,7 @@ export class AuthService {
   async updateOrganization(
     userId: string,
     dto: UpdateOrganizationDto,
-  ): Promise<any> {
+  ): Promise<OrganizationDetail> {
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
       include: { role: true },
@@ -707,5 +731,121 @@ export class AuthService {
     });
 
     return { logoUrl: url };
+  }
+
+  /**
+   * Request password reset token and dispatch email instructions.
+   * Always responds with success to prevent user account enumeration.
+   */
+  async forgotPassword(
+    dto: ForgotPasswordDto,
+  ): Promise<{ message: string }> {
+    const email = dto.email.toLowerCase().trim();
+    const whereClause: { email: string; organizationId?: string } = { email };
+
+    if (dto.organizationSlug) {
+      const org = await this.prisma.organization.findUnique({
+        where: { slug: dto.organizationSlug.toLowerCase().trim() },
+        select: { id: true },
+      });
+      if (org) {
+        whereClause.organizationId = org.id;
+      }
+    }
+
+    const user = await this.prisma.user.findFirst({
+      where: whereClause,
+      include: { organization: { select: { name: true } } },
+    });
+
+    if (user && user.isActive) {
+      const rawToken = crypto.randomBytes(32).toString('hex');
+      const hashedToken = crypto.createHash('sha256').update(rawToken).digest('hex');
+      const resetExpires = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
+
+      await this.prisma.user.update({
+        where: { id: user.id },
+        data: {
+          resetPasswordToken: hashedToken,
+          resetPasswordExpires: resetExpires,
+        },
+      });
+
+      const frontendUrl = this.configService.get<string>('APP_URL') || 'http://localhost:5173';
+      const resetLink = `${frontendUrl}/reset-password?token=${rawToken}`;
+      const companyName = user.organization?.name || 'ATS Platform';
+
+      const emailService = this.emailService || new EmailService();
+      await emailService.sendMail({
+        to: user.email,
+        subject: `Password Reset Request - ${companyName}`,
+        text: `You recently requested to reset your password for ${companyName}. Click the link below to set a new password (valid for 1 hour):\n\n${resetLink}\n\nIf you did not request this, please ignore this email.`,
+        html: `
+          <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; max-width: 580px; margin: 0 auto; padding: 24px; background: #ffffff; border-radius: 8px; border: 1px solid #e2e8f0;">
+            <h2 style="color: #0f172a; margin-bottom: 16px;">Password Reset Request</h2>
+            <p style="color: #475569; font-size: 15px; line-height: 1.6;">
+              Hello <strong>${user.firstName}</strong>,
+            </p>
+            <p style="color: #475569; font-size: 15px; line-height: 1.6;">
+              We received a request to reset your password for your <strong>${companyName}</strong> account.
+            </p>
+            <div style="margin: 28px 0; text-align: center;">
+              <a href="${resetLink}" style="background-color: #4f46e5; color: #ffffff; padding: 12px 24px; font-weight: 600; text-decoration: none; border-radius: 6px; display: inline-block; font-size: 15px;">
+                Reset Password
+              </a>
+            </div>
+            <p style="color: #64748b; font-size: 13px; line-height: 1.5;">
+              This link is valid for <strong>1 hour</strong>. If you did not make this request, you can safely ignore this email; your account remains secure.
+            </p>
+            <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 24px 0;" />
+            <p style="color: #94a3b8; font-size: 12px;">
+              Button not working? Copy and paste this URL into your browser:<br/>
+              <a href="${resetLink}" style="color: #4f46e5; word-break: break-all;">${resetLink}</a>
+            </p>
+          </div>
+        `,
+      });
+    }
+
+    return {
+      message: 'If an account exists with that email, password reset instructions have been dispatched.',
+    };
+  }
+
+  /**
+   * Reset user password using a valid, unexpired reset token.
+   * Revokes all active refresh tokens for security.
+   */
+  async resetPassword(
+    dto: ResetPasswordDto,
+  ): Promise<{ message: string }> {
+    const hashedToken = crypto.createHash('sha256').update(dto.token).digest('hex');
+
+    const user = await this.prisma.user.findFirst({
+      where: {
+        resetPasswordToken: hashedToken,
+        resetPasswordExpires: { gt: new Date() },
+      },
+    });
+
+    if (!user) {
+      throw new BadRequestException('Invalid or expired password reset token');
+    }
+
+    const newPasswordHash = await bcrypt.hash(dto.newPassword, 12);
+
+    await this.prisma.user.update({
+      where: { id: user.id },
+      data: {
+        passwordHash: newPasswordHash,
+        resetPasswordToken: null,
+        resetPasswordExpires: null,
+        refreshTokenHash: null, // Revokes active session on all devices
+      },
+    });
+
+    return {
+      message: 'Your password has been successfully reset. Please log in with your new credentials.',
+    };
   }
 }

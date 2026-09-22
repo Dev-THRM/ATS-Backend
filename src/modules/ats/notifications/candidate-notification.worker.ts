@@ -154,7 +154,7 @@ export class CandidateNotificationWorker extends WorkerHost {
       joiningDate,
     } = data;
 
-    const resolvedCompany = companyName || 'THRM Digital Marketing Agency';
+    const resolvedCompany = companyName || 'Hiring Organization';
 
     this.logger.log(
       `Processing status update notification for candidate ${candidateName} (${candidateEmail || candidatePhone || 'no-contact'}) -> Stage: ${stageName}`,

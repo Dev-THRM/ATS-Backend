@@ -66,6 +66,7 @@ describe('ApplicationsController', () => {
       mockUserId,
       true,
       undefined,
+      undefined,
     );
   });
 
