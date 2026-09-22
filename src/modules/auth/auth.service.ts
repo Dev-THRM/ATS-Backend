@@ -21,11 +21,15 @@ import { RefreshTokenDto } from './dto/refresh-token.dto.js';
 import { UpdateOrganizationDto } from './dto/update-organization.dto.js';
 import { ForgotPasswordDto } from './dto/forgot-password.dto.js';
 import { ResetPasswordDto } from './dto/reset-password.dto.js';
+import { AddMemberDto } from './dto/add-member.dto.js';
+import { UpdateMemberDto } from './dto/update-member.dto.js';
 import {
   AuthResponse,
   AuthTokens,
   UserSummary,
   OrganizationDetail,
+  OrganizationRole,
+  OrganizationMember,
 } from './interfaces/auth-response.interface.js';
 import {
   JwtPayload,
@@ -847,5 +851,355 @@ export class AuthService {
     return {
       message: 'Your password has been successfully reset. Please log in with your new credentials.',
     };
+  }
+
+  /**
+   * Get all active roles available for user's organization
+   */
+  async getOrganizationRoles(userId: string): Promise<OrganizationRole[]> {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { organizationId: true },
+    });
+    if (!user) throw new NotFoundException('User not found');
+
+    const roles = await this.prisma.role.findMany({
+      where: { organizationId: user.organizationId },
+      orderBy: { createdAt: 'asc' },
+    });
+
+    return roles.map((r) => ({
+      id: r.id,
+      name: r.name,
+      description: r.description,
+      type: r.type,
+      permissions: r.permissions,
+      isSystem: r.isSystem,
+    }));
+  }
+
+  /**
+   * List all team members in user's organization
+   */
+  async getOrganizationMembers(userId: string): Promise<OrganizationMember[]> {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { organizationId: true },
+    });
+    if (!user) throw new NotFoundException('User not found');
+
+    const members = await this.prisma.user.findMany({
+      where: { organizationId: user.organizationId },
+      include: {
+        role: {
+          select: {
+            id: true,
+            name: true,
+            type: true,
+            description: true,
+          },
+        },
+      },
+      orderBy: { createdAt: 'asc' },
+    });
+
+    return members.map((m) => ({
+      id: m.id,
+      firstName: m.firstName,
+      lastName: m.lastName,
+      email: m.email,
+      phone: m.phone,
+      avatarUrl: m.avatarUrl,
+      isActive: m.isActive,
+      lastLoginAt: m.lastLoginAt,
+      createdAt: m.createdAt,
+      role: m.role,
+    }));
+  }
+
+  /**
+   * Add a new member to the organization with role and credentials
+   */
+  async addOrganizationMember(
+    requesterId: string,
+    dto: AddMemberDto,
+  ): Promise<OrganizationMember> {
+    const requester = await this.prisma.user.findUnique({
+      where: { id: requesterId },
+      include: { role: true, organization: true },
+    });
+    if (!requester) throw new NotFoundException('Requester not found');
+
+    const allowedRoles: string[] = [SystemRoleType.SUPER_ADMIN, SystemRoleType.ADMIN];
+    if (
+      !requester.role ||
+      (!allowedRoles.includes(requester.role.type) &&
+        requester.role.name !== 'Super Admin' &&
+        requester.role.name !== 'Admin')
+    ) {
+      throw new ForbiddenException(
+        'Only Super Admins or Admins can invite new team members to the organization.',
+      );
+    }
+
+    const orgId = requester.organizationId;
+    const cleanEmail = dto.email.toLowerCase().trim();
+
+    // Check if user already exists in this organization
+    const existing = await this.prisma.user.findUnique({
+      where: {
+        email_organizationId: {
+          email: cleanEmail,
+          organizationId: orgId,
+        },
+      },
+    });
+    if (existing) {
+      throw new ConflictException(
+        `A team member with email '${cleanEmail}' already exists in ${requester.organization.name}.`,
+      );
+    }
+
+    // Verify role belongs to this organization
+    const targetRole = await this.prisma.role.findFirst({
+      where: {
+        id: dto.roleId,
+        organizationId: orgId,
+      },
+    });
+    if (!targetRole) {
+      throw new BadRequestException('Selected role is invalid for this organization.');
+    }
+
+    // Verify organization seat capacity
+    const [currentMembersCount, subscription] = await Promise.all([
+      this.prisma.user.count({ where: { organizationId: orgId } }),
+      this.prisma.subscription.findFirst({ where: { organizationId: orgId } }),
+    ]);
+
+    const maxUsers = subscription?.maxUsers || 25;
+    if (currentMembersCount >= maxUsers) {
+      throw new BadRequestException(
+        `Seat limit reached (${currentMembersCount}/${maxUsers}). Please upgrade your subscription plan to add more members.`,
+      );
+    }
+
+    // Determine initial password
+    const rawPassword =
+      dto.password?.trim() ||
+      `${crypto.randomBytes(4).toString('hex')}A1!${crypto.randomBytes(3).toString('hex')}`;
+    const passwordHash = await bcrypt.hash(rawPassword, 12);
+
+    const created = await this.prisma.user.create({
+      data: {
+        organizationId: orgId,
+        roleId: targetRole.id,
+        email: cleanEmail,
+        passwordHash,
+        firstName: dto.firstName.trim(),
+        lastName: dto.lastName.trim(),
+        phone: dto.phone?.trim() || null,
+        isActive: true,
+      },
+      include: {
+        role: {
+          select: {
+            id: true,
+            name: true,
+            type: true,
+            description: true,
+          },
+        },
+      },
+    });
+
+    // Send invitation email
+    const frontendUrl = this.configService.get<string>('APP_URL') || 'http://localhost:5173';
+    const loginUrl = `${frontendUrl}/login?organizationSlug=${requester.organization.slug}`;
+    const emailService = this.emailService || new EmailService();
+
+    void emailService.sendMail({
+      to: cleanEmail,
+      subject: `You have been invited to join ${requester.organization.name} on ATS`,
+      text: `Hello ${created.firstName},\n\nYou have been invited to join ${requester.organization.name} as a ${targetRole.name}.\n\nOrganization: ${requester.organization.name} (@${requester.organization.slug})\nLogin Email: ${cleanEmail}\nTemporary Password: ${rawPassword}\n\nLogin URL: ${loginUrl}\n\nPlease change your password upon logging in.`,
+      html: `
+        <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 580px; margin: 0 auto; padding: 24px; background: #ffffff; border-radius: 12px; border: 1px solid #e2e8f0;">
+          <h2 style="color: #0f172a; margin-top: 0;">Welcome to ${requester.organization.name}</h2>
+          <p style="color: #475569; font-size: 15px; line-height: 1.6;">
+            Hello <strong>${created.firstName}</strong>,
+          </p>
+          <p style="color: #475569; font-size: 15px; line-height: 1.6;">
+            <strong>${requester.firstName} ${requester.lastName}</strong> has invited you to join the recruitment workspace for <strong>${requester.organization.name}</strong> as a <strong>${targetRole.name}</strong>.
+          </p>
+          <div style="background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 16px; margin: 20px 0;">
+            <p style="margin: 4px 0; color: #334155; font-size: 14px;"><strong>Organization:</strong> ${requester.organization.name} (@${requester.organization.slug})</p>
+            <p style="margin: 4px 0; color: #334155; font-size: 14px;"><strong>Role:</strong> ${targetRole.name}</p>
+            <p style="margin: 4px 0; color: #334155; font-size: 14px;"><strong>Email:</strong> ${cleanEmail}</p>
+            <p style="margin: 4px 0; color: #334155; font-size: 14px;"><strong>Initial Password:</strong> <code style="background: #e2e8f0; padding: 2px 6px; border-radius: 4px; font-size: 14px;">${rawPassword}</code></p>
+          </div>
+          <div style="text-align: center; margin: 28px 0;">
+            <a href="${loginUrl}" style="background-color: #0284c7; color: #ffffff; padding: 12px 28px; font-weight: 600; text-decoration: none; border-radius: 8px; display: inline-block; font-size: 15px;">
+              Access ATS Workspace
+            </a>
+          </div>
+          <p style="color: #64748b; font-size: 13px;">For security, we recommend changing your password after your first login.</p>
+        </div>
+      `,
+    }).catch(() => null);
+
+    return {
+      id: created.id,
+      firstName: created.firstName,
+      lastName: created.lastName,
+      email: created.email,
+      phone: created.phone,
+      avatarUrl: created.avatarUrl,
+      isActive: created.isActive,
+      lastLoginAt: created.lastLoginAt,
+      createdAt: created.createdAt,
+      role: created.role,
+    };
+  }
+
+  /**
+   * Update an existing team member's role or status
+   */
+  async updateOrganizationMember(
+    requesterId: string,
+    memberId: string,
+    dto: UpdateMemberDto,
+  ): Promise<OrganizationMember> {
+    const requester = await this.prisma.user.findUnique({
+      where: { id: requesterId },
+      include: { role: true },
+    });
+    if (!requester) throw new NotFoundException('Requester not found');
+
+    const allowedRoles: string[] = [SystemRoleType.SUPER_ADMIN, SystemRoleType.ADMIN];
+    if (
+      !requester.role ||
+      (!allowedRoles.includes(requester.role.type) &&
+        requester.role.name !== 'Super Admin' &&
+        requester.role.name !== 'Admin')
+    ) {
+      throw new ForbiddenException('Only Super Admins or Admins can modify team members.');
+    }
+
+    if (requesterId === memberId && dto.isActive === false) {
+      throw new BadRequestException('You cannot deactivate your own account.');
+    }
+
+    const member = await this.prisma.user.findFirst({
+      where: { id: memberId, organizationId: requester.organizationId },
+      include: { role: true },
+    });
+    if (!member) {
+      throw new NotFoundException('Team member not found in your organization.');
+    }
+
+    if (
+      member.role.type === SystemRoleType.SUPER_ADMIN &&
+      requester.role.type !== SystemRoleType.SUPER_ADMIN &&
+      dto.roleId &&
+      dto.roleId !== member.roleId
+    ) {
+      throw new ForbiddenException('Only a Super Admin can change another Super Admin role.');
+    }
+
+    if (dto.roleId) {
+      const validRole = await this.prisma.role.findFirst({
+        where: { id: dto.roleId, organizationId: requester.organizationId },
+      });
+      if (!validRole) {
+        throw new BadRequestException('Invalid role specified for this organization.');
+      }
+    }
+
+    const updated = await this.prisma.user.update({
+      where: { id: memberId },
+      data: {
+        ...(dto.roleId ? { roleId: dto.roleId } : {}),
+        ...(dto.isActive !== undefined ? { isActive: dto.isActive } : {}),
+        ...(dto.firstName ? { firstName: dto.firstName.trim() } : {}),
+        ...(dto.lastName ? { lastName: dto.lastName.trim() } : {}),
+        ...(dto.phone !== undefined ? { phone: dto.phone ? dto.phone.trim() : null } : {}),
+      },
+      include: {
+        role: {
+          select: {
+            id: true,
+            name: true,
+            type: true,
+            description: true,
+          },
+        },
+      },
+    });
+
+    return {
+      id: updated.id,
+      firstName: updated.firstName,
+      lastName: updated.lastName,
+      email: updated.email,
+      phone: updated.phone,
+      avatarUrl: updated.avatarUrl,
+      isActive: updated.isActive,
+      lastLoginAt: updated.lastLoginAt,
+      createdAt: updated.createdAt,
+      role: updated.role,
+    };
+  }
+
+  /**
+   * Remove a member from the organization
+   */
+  async removeOrganizationMember(
+    requesterId: string,
+    memberId: string,
+  ): Promise<{ message: string }> {
+    const requester = await this.prisma.user.findUnique({
+      where: { id: requesterId },
+      include: { role: true },
+    });
+    if (!requester) throw new NotFoundException('Requester not found');
+
+    const allowedRoles: string[] = [SystemRoleType.SUPER_ADMIN, SystemRoleType.ADMIN];
+    if (
+      !requester.role ||
+      (!allowedRoles.includes(requester.role.type) &&
+        requester.role.name !== 'Super Admin' &&
+        requester.role.name !== 'Admin')
+    ) {
+      throw new ForbiddenException('Only Super Admins or Admins can remove team members.');
+    }
+
+    if (requesterId === memberId) {
+      throw new BadRequestException('You cannot remove yourself from the organization.');
+    }
+
+    const member = await this.prisma.user.findFirst({
+      where: { id: memberId, organizationId: requester.organizationId },
+      include: { role: true },
+    });
+    if (!member) {
+      throw new NotFoundException('Team member not found in your organization.');
+    }
+
+    if (member.role.type === SystemRoleType.SUPER_ADMIN) {
+      throw new ForbiddenException('Super Admin account cannot be removed.');
+    }
+
+    try {
+      await this.prisma.user.delete({
+        where: { id: memberId },
+      });
+      return { message: 'Team member has been removed.' };
+    } catch {
+      await this.prisma.user.update({
+        where: { id: memberId },
+        data: { isActive: false, refreshTokenHash: null },
+      });
+      return { message: 'Team member has existing activity logs and has been deactivated.' };
+    }
   }
 }

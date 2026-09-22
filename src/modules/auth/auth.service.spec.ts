@@ -52,11 +52,21 @@ describe('AuthService', () => {
       organization: {
         findUnique: vi.fn(),
       },
+      role: {
+        findMany: vi.fn(),
+        findFirst: vi.fn(),
+      },
+      subscription: {
+        findFirst: vi.fn(),
+      },
       user: {
         findUnique: vi.fn(),
         findFirst: vi.fn(),
         findMany: vi.fn(),
+        create: vi.fn(),
         update: vi.fn(),
+        delete: vi.fn(),
+        count: vi.fn(),
       },
       $transaction: vi.fn(),
     };
@@ -246,5 +256,107 @@ describe('AuthService', () => {
       );
     });
   });
+
+  describe('Organization Team Management', () => {
+    it('should list organization roles', async () => {
+      prisma.user.findUnique.mockResolvedValue(mockUser);
+      prisma.role.findMany.mockResolvedValue([
+        { id: 'role-1', name: 'Recruiter', description: 'Hiring team', type: 'RECRUITER', permissions: [], isSystem: true },
+      ]);
+
+      const roles = await service.getOrganizationRoles('user-uuid-1');
+      expect(roles).toHaveLength(1);
+      expect(roles[0].name).toBe('Recruiter');
+    });
+
+    it('should list organization members', async () => {
+      prisma.user.findUnique.mockResolvedValue(mockUser);
+      prisma.user.findMany.mockResolvedValue([mockUser]);
+
+      const members = await service.getOrganizationMembers('user-uuid-1');
+      expect(members).toHaveLength(1);
+      expect(members[0].email).toBe('owner@acme.com');
+    });
+
+    it('should allow Super Admin to invite a new team member', async () => {
+      prisma.user.findUnique.mockResolvedValue(mockUser);
+      prisma.user.findUnique.mockImplementation(({ where }) => {
+        if (where?.id) return Promise.resolve(mockUser);
+        if (where?.email_organizationId) return Promise.resolve(null);
+        return Promise.resolve(null);
+      });
+      prisma.role.findFirst.mockResolvedValue({ id: 'role-recruiter', name: 'Recruiter' });
+      prisma.user.count.mockResolvedValue(1);
+      prisma.subscription.findFirst.mockResolvedValue({ maxUsers: 25 });
+      prisma.user.create.mockResolvedValue({
+        id: 'new-user-1',
+        firstName: 'Sarah',
+        lastName: 'Recruiter',
+        email: 'sarah@acme.com',
+        phone: null,
+        avatarUrl: null,
+        isActive: true,
+        lastLoginAt: null,
+        createdAt: new Date(),
+        role: { id: 'role-recruiter', name: 'Recruiter', type: 'RECRUITER', description: 'Recruiter' },
+      });
+
+      const member = await service.addOrganizationMember('user-uuid-1', {
+        firstName: 'Sarah',
+        lastName: 'Recruiter',
+        email: 'sarah@acme.com',
+        roleId: 'role-recruiter',
+      });
+
+      expect(member.id).toBe('new-user-1');
+      expect(member.email).toBe('sarah@acme.com');
+      expect(prisma.user.create).toHaveBeenCalled();
+    });
+
+    it('should reject adding member with duplicate email in same org', async () => {
+      prisma.user.findUnique.mockImplementation(({ where }) => {
+        if (where?.id) return Promise.resolve(mockUser);
+        if (where?.email_organizationId) return Promise.resolve(mockUser);
+        return Promise.resolve(null);
+      });
+
+      await expect(
+        service.addOrganizationMember('user-uuid-1', {
+          firstName: 'Duplicate',
+          lastName: 'User',
+          email: 'owner@acme.com',
+          roleId: 'role-1',
+        }),
+      ).rejects.toThrow('already exists in');
+    });
+
+    it('should allow updating member role or status', async () => {
+      prisma.user.findUnique.mockResolvedValue(mockUser);
+      prisma.user.findFirst.mockResolvedValue({
+        id: 'member-2',
+        organizationId: 'org-uuid-1',
+        role: { type: 'RECRUITER' },
+      });
+      prisma.role.findFirst.mockResolvedValue({ id: 'role-admin' });
+      prisma.user.update.mockResolvedValue({
+        id: 'member-2',
+        firstName: 'Sarah',
+        lastName: 'Recruiter',
+        email: 'sarah@acme.com',
+        phone: null,
+        avatarUrl: null,
+        isActive: true,
+        lastLoginAt: null,
+        createdAt: new Date(),
+        role: { id: 'role-admin', name: 'Admin', type: 'ADMIN' },
+      });
+
+      const updated = await service.updateOrganizationMember('user-uuid-1', 'member-2', {
+        roleId: 'role-admin',
+      });
+      expect(updated.role.name).toBe('Admin');
+    });
+  });
 });
+
 

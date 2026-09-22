@@ -41,6 +41,33 @@ export interface OrganizationDetail {
   };
 }
 
+export interface OrganizationRole {
+  id: string;
+  name: string;
+  description: string | null;
+  type: string;
+  permissions: string[];
+  isSystem: boolean;
+}
+
+export interface OrganizationMember {
+  id: string;
+  firstName: string;
+  lastName: string;
+  email: string;
+  phone: string | null;
+  avatarUrl: string | null;
+  isActive: boolean;
+  lastLoginAt: Date | null;
+  createdAt: Date;
+  role: {
+    id: string;
+    name: string;
+    type: string;
+    description?: string | null;
+  };
+}
+
 export interface AuthTokens {
   accessToken: string;
   refreshToken: string;
@@ -51,4 +78,5 @@ export interface AuthResponse {
   user: UserSummary;
   tokens: AuthTokens;
 }
+
 

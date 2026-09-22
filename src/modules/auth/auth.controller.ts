@@ -3,6 +3,8 @@ import {
   Post,
   Get,
   Patch,
+  Delete,
+  Param,
   Body,
   Query,
   HttpCode,
@@ -28,6 +30,8 @@ import { RefreshTokenDto } from './dto/refresh-token.dto.js';
 import { UpdateOrganizationDto } from './dto/update-organization.dto.js';
 import { ForgotPasswordDto } from './dto/forgot-password.dto.js';
 import { ResetPasswordDto } from './dto/reset-password.dto.js';
+import { AddMemberDto } from './dto/add-member.dto.js';
+import { UpdateMemberDto } from './dto/update-member.dto.js';
 import { Public } from '../../common/decorators/public.decorator.js';
 import { CurrentUser } from '../../common/decorators/current-user.decorator.js';
 import { JwtAuthGuard } from './guards/jwt-auth.guard.js';
@@ -36,6 +40,8 @@ import {
   AuthTokens,
   UserSummary,
   OrganizationDetail,
+  OrganizationRole,
+  OrganizationMember,
 } from './interfaces/auth-response.interface.js';
 
 @ApiTags('Authentication & Organization')
@@ -228,6 +234,75 @@ export class AuthController {
     @UploadedFile() file: Express.Multer.File,
   ): Promise<{ logoUrl: string }> {
     return this.authService.uploadOrganizationLogo(userId, file);
+  }
+
+  /**
+   * Get all active roles available within the user's organization
+   * Example: GET /api/v1/auth/organization/roles
+   */
+  @Get('organization/roles')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Get roles available in tenant organization' })
+  async getOrganizationRoles(
+    @CurrentUser('userId') userId: string,
+  ): Promise<OrganizationRole[]> {
+    return this.authService.getOrganizationRoles(userId);
+  }
+
+  /**
+   * Get all team members in the user's organization
+   * Example: GET /api/v1/auth/organization/members
+   */
+  @Get('organization/members')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'List all team members belonging to this organization' })
+  async getOrganizationMembers(
+    @CurrentUser('userId') userId: string,
+  ): Promise<OrganizationMember[]> {
+    return this.authService.getOrganizationMembers(userId);
+  }
+
+  /**
+   * Add / invite a new team member to the organization (Super Admin / Admin only)
+   * Example: POST /api/v1/auth/organization/members
+   */
+  @Post('organization/members')
+  @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({ summary: 'Invite a new team member to the organization' })
+  async addOrganizationMember(
+    @CurrentUser('userId') userId: string,
+    @Body() dto: AddMemberDto,
+  ): Promise<OrganizationMember> {
+    return this.authService.addOrganizationMember(userId, dto);
+  }
+
+  /**
+   * Update team member role or active status (Super Admin / Admin only)
+   * Example: PATCH /api/v1/auth/organization/members/:id
+   */
+  @Patch('organization/members/:id')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Update organization member role or active status' })
+  async updateOrganizationMember(
+    @CurrentUser('userId') userId: string,
+    @Param('id') memberId: string,
+    @Body() dto: UpdateMemberDto,
+  ): Promise<OrganizationMember> {
+    return this.authService.updateOrganizationMember(userId, memberId, dto);
+  }
+
+  /**
+   * Remove a team member from the organization (Super Admin / Admin only)
+   * Example: DELETE /api/v1/auth/organization/members/:id
+   */
+  @Delete('organization/members/:id')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Remove a member from the organization' })
+  async removeOrganizationMember(
+    @CurrentUser('userId') userId: string,
+    @Param('id') memberId: string,
+  ): Promise<{ message: string }> {
+    return this.authService.removeOrganizationMember(userId, memberId);
   }
 }
 
