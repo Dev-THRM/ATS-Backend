@@ -221,7 +221,12 @@ export class AuthService {
             type: SystemRoleType.EMPLOYEE,
             isSystem: true,
             organizationId: org.id,
-            permissions: ['profile:read', 'profile:update'],
+            permissions: [
+              'profile:read',
+              'profile:update',
+              'jobs:read',
+              'candidates:read',
+            ],
           },
         ],
       });
@@ -1099,11 +1104,9 @@ export class AuthService {
 
     if (
       member.role.type === SystemRoleType.SUPER_ADMIN &&
-      requester.role.type !== SystemRoleType.SUPER_ADMIN &&
-      dto.roleId &&
-      dto.roleId !== member.roleId
+      requester.role.type !== SystemRoleType.SUPER_ADMIN
     ) {
-      throw new ForbiddenException('Only a Super Admin can change another Super Admin role.');
+      throw new ForbiddenException('Only a Super Admin can modify a Super Admin profile or role.');
     }
 
     if (dto.roleId) {

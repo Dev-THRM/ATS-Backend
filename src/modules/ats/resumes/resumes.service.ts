@@ -379,26 +379,23 @@ export class ResumesService {
             this.logger.warn(`Inline scoring: Failed to fetch from Google Drive: ${err.message}`);
             return;
           }
-        } else {
+        } else if (resumeKey && resumeKey !== 'candidate-profile-context') {
           try {
             fileBuffer = await this.storageService.getFileBuffer(resumeKey);
           } catch {
             this.logger.warn(`Inline scoring: file not found in storage for key: ${resumeKey}`);
-            return;
           }
         }
       }
 
-      if (!fileBuffer || fileBuffer.length === 0) {
-        this.logger.warn(`Inline scoring: empty buffer for key: ${resumeKey}`);
-        return;
-      }
-
-      // 2. Extract raw text
-      const rawText = await this.resumeParser.extractTextFromBuffer(fileBuffer, mimeType);
-      if (!rawText || rawText.trim().length === 0) {
-        this.logger.warn(`Inline scoring: no text extracted from ${resumeKey}`);
-        return;
+      // 2. Extract raw text from buffer if available
+      let rawText = '';
+      if (fileBuffer && fileBuffer.length > 0) {
+        try {
+          rawText = await this.resumeParser.extractTextFromBuffer(fileBuffer, mimeType);
+        } catch (err: any) {
+          this.logger.warn(`Inline scoring: failed buffer extraction: ${err.message}`);
+        }
       }
 
       // 3. Fetch application + job context if available
@@ -409,6 +406,7 @@ export class ResumesService {
         application = await this.prisma.application.findFirst({
           where: { id: applicationId },
           include: {
+            candidate: true,
             job: {
               include: {
                 pipelineStages: { orderBy: { order: 'asc' } },
@@ -418,6 +416,33 @@ export class ResumesService {
           },
         });
         if (application) targetJob = application.job;
+      }
+
+      // Fallback: If resume text could not be extracted, synthesize from candidate profile and application context
+      if (!rawText || rawText.trim().length === 0) {
+        this.logger.log(`Inline scoring: synthesizing candidate profile context for scoring`);
+        const cand = candidateId
+          ? await this.prisma.candidate.findUnique({ where: { id: candidateId } })
+          : application?.candidate;
+
+        const candidateName = cand ? `${cand.firstName} ${cand.lastName}`.trim() : '';
+        const fallbackParts = [
+          candidateName ? `Candidate Name: ${candidateName}` : '',
+          cand?.currentTitle ? `Current Title: ${cand.currentTitle}` : '',
+          cand?.currentCompany ? `Current Company: ${cand.currentCompany}` : '',
+          cand?.skills?.length ? `Skills: ${cand.skills.join(', ')}` : '',
+          cand?.location ? `Location: ${cand.location}` : '',
+          application?.coverLetter ? `Cover Letter / Note: ${application.coverLetter}` : '',
+          targetJob?.title ? `Target Role: ${targetJob.title}` : '',
+          targetJob?.description ? `Target Job Description: ${targetJob.description}` : '',
+        ].filter(Boolean);
+
+        rawText = fallbackParts.join('\n\n');
+      }
+
+      if (!rawText || rawText.trim().length === 0) {
+        this.logger.warn(`Inline scoring: no text available for key: ${resumeKey}`);
+        return;
       }
 
       // 4. Score: Gemini Flash first, local engine fallback

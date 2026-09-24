@@ -637,27 +637,29 @@ export class ApplicationsService {
     const app = await this.findOne(organizationId, applicationId);
     const metadata = (app.metadata as Record<string, any>) || {};
 
-    const resumeKey =
+    const rawResume =
       metadata.resumeKey ||
-      (app.candidate.resumeUrl?.includes('resumes/')
-        ? app.candidate.resumeUrl.split('storage/')[1] || app.candidate.resumeUrl
-        : null);
+      metadata.resumeUrl ||
+      app.candidate?.resumeUrl ||
+      '';
 
-    if (!resumeKey && !app.candidate.resumeUrl?.includes('drive.google.com')) {
-      if (app.candidate.resumeUrl?.startsWith('http') && !app.candidate.resumeUrl.includes('resumes/')) {
-        throw new BadRequestException(
-          'Cannot run AI scoring on external URLs. Please upload a physical PDF or Word document to enable AI ATS matching.',
-        );
-      }
-
-      throw new BadRequestException(
-        'No resume file found for this application or candidate. Please upload a resume first.',
-      );
+    let resolvedResumeKey = '';
+    if (rawResume.includes('resumes/')) {
+      const parts = rawResume.split('resumes/');
+      resolvedResumeKey = 'resumes/' + parts[parts.length - 1].split('?')[0];
+    } else if (rawResume && !rawResume.startsWith('http')) {
+      resolvedResumeKey = rawResume
+        .replace(/^\/?storage\//, '')
+        .replace(/^\\?storage\\/, '')
+        .replace(/^[/\\]+/, '')
+        .split('?')[0];
     }
 
     const effectiveResumeKey =
-      resumeKey ||
-      (app.candidate.resumeUrl?.includes('drive.google.com') ? 'google-drive-link' : '');
+      resolvedResumeKey ||
+      (rawResume.includes('drive.google.com') ? 'google-drive-link' : 'candidate-profile-context');
+
+    const effectiveResumeUrl = rawResume || app.candidate?.resumeUrl || undefined;
 
     // Try BullMQ queue first
     let queuedSuccessfully = false;
@@ -669,7 +671,7 @@ export class ApplicationsService {
           jobId: app.jobId,
           applicationId: app.id,
           resumeKey: effectiveResumeKey,
-          resumeUrl: app.candidate.resumeUrl,
+          resumeUrl: effectiveResumeUrl,
         });
         queuedSuccessfully = true;
         this.logger.log(`Reparse queued via BullMQ for application ${applicationId}`);
@@ -680,31 +682,34 @@ export class ApplicationsService {
       }
     }
 
-    // Inline fallback when queue is unavailable
+    // Inline fallback when queue is unavailable or synchronous completion desired
     if (!queuedSuccessfully && this.resumesService) {
       this.logger.log(`Running inline reparse for application ${applicationId}`);
-      this.resumesService
-        .runInlineScoring({
+      try {
+        await this.resumesService.runInlineScoring({
           organizationId,
           resumeKey: effectiveResumeKey,
-          resumeUrl: app.candidate.resumeUrl ?? undefined,
+          resumeUrl: effectiveResumeUrl,
           candidateId: app.candidateId,
           applicationId: app.id,
-        })
-        .catch((err: any) =>
-          this.logger.error(`Inline reparse error for application ${applicationId}: ${err.message}`, err.stack),
-        );
+        });
+      } catch (err: any) {
+        this.logger.error(`Inline reparse error for application ${applicationId}: ${err.message}`, err.stack);
+      }
     } else if (!queuedSuccessfully) {
       throw new BadRequestException(
         'Resume queue is currently unavailable and inline scoring service could not be initialised.',
       );
     }
 
+    // Retrieve freshly updated application with score
+    const updatedApp = await this.findOne(organizationId, applicationId);
+
     return {
-      message: queuedSuccessfully
-        ? 'Resume parsing and AI analysis enqueued successfully'
-        : 'Resume parsing started (inline mode — Redis unavailable)',
+      message: 'AI ATS scoring completed successfully',
       applicationId: app.id,
+      atsScore: updatedApp.atsScore,
+      metadata: updatedApp.metadata,
     };
   }
 

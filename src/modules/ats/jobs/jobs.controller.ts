@@ -44,8 +44,6 @@ export class JobsController {
   @Roles(
     SystemRoleType.SUPER_ADMIN,
     SystemRoleType.ADMIN,
-    SystemRoleType.RECRUITER,
-    SystemRoleType.MANAGER,
   )
   @Permissions('jobs:create')
   async create(
@@ -96,8 +94,6 @@ export class JobsController {
   @Roles(
     SystemRoleType.SUPER_ADMIN,
     SystemRoleType.ADMIN,
-    SystemRoleType.RECRUITER,
-    SystemRoleType.MANAGER,
   )
   @Permissions('jobs:update')
   update(
@@ -112,7 +108,6 @@ export class JobsController {
   @Roles(
     SystemRoleType.SUPER_ADMIN,
     SystemRoleType.ADMIN,
-    SystemRoleType.RECRUITER,
   )
   @Permissions('jobs:publish')
   updateStatus(

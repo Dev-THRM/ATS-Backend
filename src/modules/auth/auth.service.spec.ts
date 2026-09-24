@@ -280,7 +280,7 @@ describe('AuthService', () => {
 
     it('should allow Super Admin to invite a new team member', async () => {
       prisma.user.findUnique.mockResolvedValue(mockUser);
-      prisma.user.findUnique.mockImplementation(({ where }) => {
+      prisma.user.findUnique.mockImplementation(({ where }: any) => {
         if (where?.id) return Promise.resolve(mockUser);
         if (where?.email_organizationId) return Promise.resolve(null);
         return Promise.resolve(null);
@@ -314,7 +314,7 @@ describe('AuthService', () => {
     });
 
     it('should reject adding member with duplicate email in same org', async () => {
-      prisma.user.findUnique.mockImplementation(({ where }) => {
+      prisma.user.findUnique.mockImplementation(({ where }: any) => {
         if (where?.id) return Promise.resolve(mockUser);
         if (where?.email_organizationId) return Promise.resolve(mockUser);
         return Promise.resolve(null);

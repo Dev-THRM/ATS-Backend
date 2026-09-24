@@ -185,7 +185,17 @@ export class StorageService {
     }
 
     // Local fallback: read from disk
-    const cleanKey = key.replace(/^\/?storage\//, '').replace(/^\\?storage\\/, '').replace(/^[/\\]+/, '');
+    let cleanKey = key;
+    if (cleanKey.includes('resumes/')) {
+      cleanKey = 'resumes/' + cleanKey.split('resumes/')[1].split('?')[0];
+    } else {
+      cleanKey = cleanKey
+        .replace(/^https?:\/\/[^/]+\//, '')
+        .replace(/^\/?storage\//, '')
+        .replace(/^\\?storage\\/, '')
+        .replace(/^[/\\]+/, '')
+        .split('?')[0];
+    }
     const targetPath = path.join(this.localStorageDir, cleanKey);
     return fs.readFile(targetPath);
   }
