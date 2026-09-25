@@ -2,6 +2,38 @@ import { Injectable, Inject } from '@nestjs/common';
 import { PrismaService } from '../shared/prisma/prisma.service.js';
 import { JobStatus, ApplicationStatus, InterviewStatus } from '@prisma/client';
 
+const STAGE_ORDER_MAP: Record<string, number> = {
+  applied: 10,
+  sourcing: 10,
+  sourced: 10,
+  application: 10,
+  screening: 20,
+  shortlist: 20,
+  shortlisted: 20,
+  assessment: 30,
+  interview: 40,
+  round: 40,
+  'hr round': 41,
+  'technical round': 42,
+  offer: 50,
+  hired: 60,
+  rejected: 70,
+  archived: 80,
+};
+
+function getStageSortOrder(stageName: string): number {
+  const normalized = stageName.trim().toLowerCase();
+  if (STAGE_ORDER_MAP[normalized] !== undefined) {
+    return STAGE_ORDER_MAP[normalized];
+  }
+  for (const [key, order] of Object.entries(STAGE_ORDER_MAP)) {
+    if (normalized.includes(key)) {
+      return order;
+    }
+  }
+  return 35; // Custom intermediate stages
+}
+
 @Injectable()
 export class AtsDashboardService {
   constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
@@ -149,10 +181,34 @@ export class AtsDashboardService {
       : [];
     const stageNameMap = new Map(stageRecords.map((s) => [s.id, s.name]));
 
-    const pipelineFunnel = applicationsByStage.map((group) => ({
-      stage: stageNameMap.get(group.currentStageId) || 'Applied',
-      count: group._count._all,
-    }));
+    // Aggregate counts by unique stage name to eliminate duplicates across multiple jobs
+    const stageAggregationMap = new Map<string, { stage: string; count: number }>();
+
+    for (const group of applicationsByStage) {
+      const rawName = (group.currentStageId && stageNameMap.get(group.currentStageId)) || 'Applied';
+      const stageName = rawName.trim();
+      const lookupKey = stageName.toLowerCase();
+
+      const existing = stageAggregationMap.get(lookupKey);
+      if (existing) {
+        existing.count += group._count._all;
+      } else {
+        stageAggregationMap.set(lookupKey, {
+          stage: stageName,
+          count: group._count._all,
+        });
+      }
+    }
+
+    // Sort the aggregated stages in logical hiring pipeline sequence
+    const pipelineFunnel = Array.from(stageAggregationMap.values()).sort((a, b) => {
+      const orderA = getStageSortOrder(a.stage);
+      const orderB = getStageSortOrder(b.stage);
+      if (orderA !== orderB) {
+        return orderA - orderB;
+      }
+      return a.stage.localeCompare(b.stage);
+    });
 
     // Format source breakdown using database-aggregated counts
     const sourcesBreakdown = candidatesBySource.map((group) => {
