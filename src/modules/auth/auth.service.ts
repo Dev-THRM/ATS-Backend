@@ -714,15 +714,8 @@ export class AuthService {
       throw new BadRequestException('No logo image file uploaded');
     }
 
-    let processedBuffer = file.buffer;
-    try {
-      const trimmed = await sharp(file.buffer).trim({ threshold: 15 }).toBuffer();
-      if (trimmed && trimmed.length > 0) {
-        processedBuffer = trimmed;
-      }
-    } catch {
-      processedBuffer = file.buffer;
-    }
+    // Preserve original uploaded buffer so logo graphics and right edges are never clipped
+    const processedBuffer = file.buffer;
 
     const ext = file.originalname ? file.originalname.split('.').pop() : 'png';
     const key = `logos/${user.organizationId}-${Date.now()}.${ext}`;
