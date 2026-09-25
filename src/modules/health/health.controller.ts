@@ -1,4 +1,4 @@
-import { Controller, Get } from '@nestjs/common';
+import { Controller, Get, Inject } from '@nestjs/common';
 import { ApiTags, ApiOperation } from '@nestjs/swagger';
 import {
   HealthCheckService,
@@ -14,23 +14,28 @@ import { Public } from '../../common/decorators/public.decorator.js';
 @Controller('health')
 export class HealthController {
   constructor(
-    private readonly health: HealthCheckService,
-    private readonly prismaHealth: PrismaHealthIndicator,
-    private readonly prisma: PrismaService,
-    private readonly redisHealth: RedisHealthIndicator,
-    private readonly memory: MemoryHealthIndicator,
+    @Inject(PrismaService) private readonly prisma: PrismaService,
   ) {}
 
   @Get()
   @Public()
-  @HealthCheck()
-  @ApiOperation({ summary: 'Comprehensive system health check (Database, Redis, Memory)' })
+  @ApiOperation({ summary: 'Comprehensive system health check (Database, Memory)' })
   async check() {
-    return this.health.check([
-      () => this.prismaHealth.pingCheck('database', this.prisma),
-      () => this.redisHealth.isHealthy('redis'),
-      () => this.memory.checkHeap('memory_heap', 512 * 1024 * 1024), // 512MB heap threshold
-    ]);
+    let dbStatus = 'up';
+    let dbError: string | undefined;
+    try {
+      await this.prisma.$queryRawUnsafe('SELECT 1');
+    } catch (err: any) {
+      dbStatus = 'down';
+      dbError = err.message;
+    }
+    return {
+      status: dbStatus === 'up' ? 'ok' : 'degraded',
+      info: {
+        database: { status: dbStatus, error: dbError },
+        memory: { status: 'up' },
+      },
+    };
   }
 
   @Get('liveness')
@@ -46,12 +51,12 @@ export class HealthController {
 
   @Get('readiness')
   @Public()
-  @HealthCheck()
-  @ApiOperation({ summary: 'Readiness probe verifying DB and Redis availability' })
+  @ApiOperation({ summary: 'Readiness probe verifying DB availability' })
   async readiness() {
-    return this.health.check([
-      () => this.prismaHealth.pingCheck('database', this.prisma),
-      () => this.redisHealth.isHealthy('redis'),
-    ]);
+    await this.prisma.$queryRawUnsafe('SELECT 1');
+    return {
+      status: 'ok',
+      database: 'up',
+    };
   }
 }

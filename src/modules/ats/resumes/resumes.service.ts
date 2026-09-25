@@ -6,11 +6,8 @@ import {
   Optional,
   Logger,
 } from '@nestjs/common';
-import { InjectQueue } from '@nestjs/bullmq';
-import { Queue } from 'bullmq';
 import { StorageService } from '../../shared/storage/storage.service.js';
 import { PrismaService } from '../../shared/prisma/prisma.service.js';
-import { RESUME_QUEUE } from '../../shared/queue/queue.module.js';
 import { GetPresignedUrlDto } from './dto/get-presigned-url.dto.js';
 import { AttachResumeDto } from './dto/attach-resume.dto.js';
 import { ResumeParserService } from '../parser/resume-parser.service.js';
@@ -48,7 +45,6 @@ export class ResumesService {
     @Inject(ResumeParserService) private readonly resumeParser: ResumeParserService,
     @Inject(AiDetectorService) private readonly aiDetector: AiDetectorService,
     @Optional() @Inject(GeminiParserService) private readonly geminiParser?: GeminiParserService,
-    @Optional() @InjectQueue(RESUME_QUEUE) private readonly resumeQueue?: Queue,
     @Optional()
     @Inject(CandidateNotificationWorker)
     private readonly notificationWorker?: CandidateNotificationWorker,
@@ -165,40 +161,17 @@ export class ResumesService {
       }
     }
 
-    // Enqueue background parsing job via Redis/BullMQ, or fall back to inline scoring
-    let queuedSuccessfully = false;
-    if (this.resumeQueue) {
-      try {
-        await this.resumeQueue.add('parse-resume', {
-          organizationId,
-          candidateId,
-          jobId,
-          applicationId,
-          resumeKey: key,
-          resumeUrl: url,
-        });
-        queuedSuccessfully = true;
-        this.logger.log(`Resume parse job queued via BullMQ for key: ${key}`);
-      } catch (queueErr: any) {
-        this.logger.warn(
-          `BullMQ queue unavailable (${queueErr.message}). Running inline scoring fallback.`,
-        );
-      }
-    }
-
-    if (!queuedSuccessfully) {
-      this.logger.log(`Running inline ATS scoring fallback for key: ${key}`);
-      // Run asynchronously so the upload response is not blocked
-      this.runInlineScoring({
-        organizationId,
-        fileBuffer: file.buffer,
-        mimeType: file.mimetype,
-        resumeKey: key,
-        resumeUrl: url,
-        candidateId,
-        applicationId,
-      }).catch((err: any) => this.logger.error(`Inline scoring error: ${err.message}`, err.stack));
-    }
+    // Run immediate inline ATS scoring using Google Gemini Flash
+    this.runInlineScoring({
+      organizationId,
+      fileBuffer: file.buffer,
+      mimeType: file.mimetype,
+      resumeKey: key,
+      resumeUrl: url,
+      candidateId,
+      applicationId,
+      jobId,
+    }).catch((err: any) => this.logger.error(`Inline scoring error: ${err.message}`, err.stack));
 
     return {
       message: 'Resume uploaded successfully and processed for AI parsing',
@@ -272,41 +245,30 @@ export class ResumesService {
       }
     }
 
-    // Enqueue parsing job if key is provided, or fall back to inline scoring
-    if (dto.key) {
-      let queuedSuccessfully = false;
-      if (this.resumeQueue) {
-        try {
-          await this.resumeQueue.add('parse-resume', {
+    // Run immediate inline Gemini AI scoring
+    if (dto.key || dto.resumeUrl) {
+      this.storageService
+        .getFileBuffer(dto.key || '')
+        .then((fileBuffer) =>
+          this.runInlineScoring({
             organizationId,
+            fileBuffer,
+            resumeKey: dto.key || 'external',
+            resumeUrl: dto.resumeUrl,
             candidateId: dto.candidateId,
             applicationId: dto.applicationId,
-            resumeKey: dto.key,
+          }),
+        )
+        .catch(() =>
+          this.runInlineScoring({
+            organizationId,
+            resumeKey: dto.key || 'external',
             resumeUrl: dto.resumeUrl,
-          });
-          queuedSuccessfully = true;
-        } catch (queueErr: any) {
-          this.logger.warn(
-            `BullMQ queue unavailable on attachResume (${queueErr.message}). Running inline scoring fallback.`,
-          );
-        }
-      }
-
-      if (!queuedSuccessfully) {
-        this.storageService
-          .getFileBuffer(dto.key)
-          .then((fileBuffer) =>
-            this.runInlineScoring({
-              organizationId,
-              fileBuffer,
-              resumeKey: dto.key!,
-              resumeUrl: dto.resumeUrl,
-              candidateId: dto.candidateId,
-              applicationId: dto.applicationId,
-            }),
-          )
-          .catch((err: any) => this.logger.warn(`Inline scoring on attachResume failed: ${err.message}`));
-      }
+            candidateId: dto.candidateId,
+            applicationId: dto.applicationId,
+          }),
+        )
+        .catch((err: any) => this.logger.warn(`Inline scoring on attachResume failed: ${err.message}`));
     }
 
     return {
@@ -336,8 +298,9 @@ export class ResumesService {
     resumeUrl?: string;
     candidateId?: string;
     applicationId?: string;
+    jobId?: string;
   }): Promise<void> {
-    const { organizationId, mimeType, resumeKey, candidateId, applicationId } = opts;
+    const { organizationId, mimeType, resumeKey, candidateId, applicationId, jobId } = opts;
 
     try {
       // 1. Get file buffer (may already be provided from upload, else fetch from storage)
@@ -355,31 +318,28 @@ export class ResumesService {
               }
             }
             if (driveId) {
-              this.logger.log(`Inline scoring: Fetching Google Drive file natively: ${driveId}`);
-              const res = await fetch(`https://drive.google.com/uc?export=download&id=${driveId}`);
-              if (res.ok) {
-                const contentType = res.headers.get('content-type') || '';
-                if (contentType.includes('text/html')) {
-                  this.logger.warn(`Google Drive link returned HTML page (private or sign-in required): ${driveId}`);
-                  return;
+              this.logger.log(`Inline scoring: Fetching Google Drive file: ${driveId}`);
+              try {
+                const res = await fetch(`https://drive.google.com/uc?export=download&id=${driveId}`);
+                if (res.ok) {
+                  const contentType = res.headers.get('content-type') || '';
+                  if (!contentType.includes('text/html')) {
+                    const arrayBuf = await res.arrayBuffer();
+                    const buf = Buffer.from(arrayBuf);
+                    const head = buf.slice(0, 300).toString('utf-8').toLowerCase();
+                    if (!head.includes('<!doctype html') && !head.includes('<html') && !head.includes('accounts.google.com')) {
+                      fileBuffer = buf;
+                    }
+                  }
                 }
-                const arrayBuf = await res.arrayBuffer();
-                const buf = Buffer.from(arrayBuf);
-                const head = buf.slice(0, 300).toString('utf-8').toLowerCase();
-                if (head.includes('<!doctype html') || head.includes('<html') || head.includes('accounts.google.com')) {
-                  this.logger.warn(`Google Drive link returned HTML web page: ${driveId}`);
-                  return;
-                }
-                fileBuffer = buf;
-              } else {
-                throw new Error(`Google Drive download failed with status ${res.status}`);
+              } catch (driveErr: any) {
+                this.logger.warn(`Inline scoring: Google Drive direct fetch skipped: ${driveErr.message}`);
               }
             }
           } catch (err: any) {
-            this.logger.warn(`Inline scoring: Failed to fetch from Google Drive: ${err.message}`);
-            return;
+            this.logger.warn(`Inline scoring: Google Drive URL parsing error: ${err.message}`);
           }
-        } else if (resumeKey && resumeKey !== 'candidate-profile-context') {
+        } else if (resumeKey && resumeKey !== 'candidate-profile-context' && resumeKey !== 'external') {
           try {
             fileBuffer = await this.storageService.getFileBuffer(resumeKey);
           } catch {
@@ -398,7 +358,7 @@ export class ResumesService {
         }
       }
 
-      // 3. Fetch application + job context if available
+      // 3. Fetch application + job context
       let application: any = null;
       let targetJob: any = null;
 
@@ -418,8 +378,46 @@ export class ResumesService {
         if (application) targetJob = application.job;
       }
 
+      if (!targetJob && jobId) {
+        targetJob = await this.prisma.job.findUnique({
+          where: { id: jobId },
+          include: { pipelineStages: { orderBy: { order: 'asc' } } },
+        });
+      }
+
+      if (!application && candidateId && targetJob) {
+        application = await this.prisma.application.findFirst({
+          where: { candidateId, jobId: targetJob.id },
+          include: {
+            candidate: true,
+            job: true,
+            currentStage: true,
+          },
+        });
+      }
+
+      // If application exists but targetJob wasn't loaded, try finding candidate's latest active job
+      if (!targetJob && candidateId) {
+        const candidateWithApps = await this.prisma.candidate.findUnique({
+          where: { id: candidateId },
+          include: {
+            applications: {
+              include: { job: true },
+              orderBy: { createdAt: 'desc' },
+              take: 1,
+            },
+          },
+        });
+        if (candidateWithApps?.applications?.[0]?.job) {
+          targetJob = candidateWithApps.applications[0].job;
+          if (!application) {
+            application = candidateWithApps.applications[0];
+          }
+        }
+      }
+
       // Fallback: If resume text could not be extracted, synthesize from candidate profile and application context
-      if (!rawText || rawText.trim().length === 0) {
+      if (!rawText || rawText.trim().length < 20) {
         this.logger.log(`Inline scoring: synthesizing candidate profile context for scoring`);
         const cand = candidateId
           ? await this.prisma.candidate.findUnique({ where: { id: candidateId } })
@@ -428,13 +426,17 @@ export class ResumesService {
         const candidateName = cand ? `${cand.firstName} ${cand.lastName}`.trim() : '';
         const fallbackParts = [
           candidateName ? `Candidate Name: ${candidateName}` : '',
-          cand?.currentTitle ? `Current Title: ${cand.currentTitle}` : '',
+          cand?.currentTitle ? `Current Title / Role: ${cand.currentTitle}` : '',
           cand?.currentCompany ? `Current Company: ${cand.currentCompany}` : '',
-          cand?.skills?.length ? `Skills: ${cand.skills.join(', ')}` : '',
+          cand?.skills?.length ? `Skills & Competencies: ${cand.skills.join(', ')}` : '',
           cand?.location ? `Location: ${cand.location}` : '',
-          application?.coverLetter ? `Cover Letter / Note: ${application.coverLetter}` : '',
+          cand?.phone ? `Phone: ${cand.phone}` : '',
+          cand?.email ? `Email: ${cand.email}` : '',
+          cand?.source ? `Sourcing Channel: ${cand.source}` : '',
+          application?.coverLetter ? `Cover Letter / Statement: ${application.coverLetter}` : '',
           targetJob?.title ? `Target Role: ${targetJob.title}` : '',
-          targetJob?.description ? `Target Job Description: ${targetJob.description}` : '',
+          targetJob?.department ? `Department: ${targetJob.department}` : '',
+          targetJob?.description ? `Target Job Description & Requirements: ${targetJob.description}` : '',
         ].filter(Boolean);
 
         rawText = fallbackParts.join('\n\n');
@@ -563,7 +565,7 @@ export class ResumesService {
       }
 
       // 7. Write ATS score + full metadata back to the application
-      if (application && targetJob) {
+      if (application) {
         const updatedMeta = JSON.parse(
           JSON.stringify({
             ...((application.metadata as Record<string, any>) || {}),
@@ -575,17 +577,17 @@ export class ResumesService {
 
         try {
           await this.prisma.application.update({
-            where: { id: applicationId },
+            where: { id: application.id },
             data: {
               atsScore,
               metadata: updatedMeta,
             },
           });
           this.logger.log(
-            `Inline scoring complete for application ${applicationId}. ATS Score: ${atsScore}/100 (provider: ${aiDetectionPayload.provider})`,
+            `Inline scoring complete for application ${application.id}. ATS Score: ${atsScore}/100 (provider: ${aiDetectionPayload.provider})`,
           );
-        } catch {
-          this.logger.warn(`Inline scoring: application ${applicationId} not found during score update`);
+        } catch (err: any) {
+          this.logger.warn(`Inline scoring: application ${application.id} not found during score update: ${err.message}`);
         }
       }
     } catch (error: any) {

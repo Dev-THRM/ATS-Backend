@@ -17,8 +17,9 @@ import { BulkImportCsvDto } from './dto/bulk-import.dto.js';
 import { randomUUID } from 'node:crypto';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
-import { NOTIFICATION_QUEUE, RESUME_QUEUE } from '../../shared/queue/queue.module.js';
+import { NOTIFICATION_QUEUE } from '../../shared/queue/queue.module.js';
 import { CandidateNotificationWorker } from '../notifications/candidate-notification.worker.js';
+import { ResumesService } from '../resumes/resumes.service.js';
 
 @Injectable()
 export class CandidatesService {
@@ -28,8 +29,8 @@ export class CandidatesService {
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Optional() @Inject(StorageService) private readonly storageService?: StorageService,
     @Optional() @Inject(ResumeParserService) private readonly resumeParser?: ResumeParserService,
+    @Optional() @Inject(ResumesService) private readonly resumesService?: ResumesService,
     @Optional() @InjectQueue(NOTIFICATION_QUEUE) private readonly notificationQueue?: Queue,
-    @Optional() @InjectQueue(RESUME_QUEUE) private readonly resumeQueue?: Queue,
     @Optional()
     @Inject(CandidateNotificationWorker)
     private readonly notificationWorker?: CandidateNotificationWorker,
@@ -180,16 +181,22 @@ export class CandidatesService {
         });
         createdApplications.push(app);
 
-        // If resume is attached, enqueue AI resume parsing
-        if (resumeKey && this.resumeQueue) {
-          await this.resumeQueue.add('parse-resume', {
-            organizationId,
-            candidateId: candidate.id,
-            jobId: job.id,
-            applicationId: app.id,
-            resumeKey,
-            resumeUrl: candidate.resumeUrl,
-          });
+        // Run Gemini AI scoring immediately when candidate is created
+        if (this.resumesService) {
+          try {
+            await this.resumesService.runInlineScoring({
+              organizationId,
+              candidateId: candidate.id,
+              jobId: job.id,
+              applicationId: app.id,
+              resumeKey: resumeKey || (candidate.resumeUrl ? 'external' : 'candidate-profile-context'),
+              resumeUrl: candidate.resumeUrl || undefined,
+            });
+          } catch (scoreErr: any) {
+            this.logger.error(
+              `Immediate AI scoring failed for candidate ${candidate.id}, app ${app.id}: ${scoreErr.message}`,
+            );
+          }
         }
 
         // Dispatch candidate application receipt notification

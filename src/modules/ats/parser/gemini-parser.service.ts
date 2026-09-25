@@ -70,9 +70,8 @@ export class GeminiParserService {
 
     const candidateModels = [
       process.env.GEMINI_MODEL || this.config.get<string>('GEMINI_MODEL') || 'gemini-3.6-flash',
-      'gemini-3.5-flash',
+      'gemini-3.8-flash',
       'gemini-flash-latest',
-      'gemini-3.5-flash-lite',
     ].filter(Boolean);
 
     for (const modelName of candidateModels) {
@@ -94,7 +93,7 @@ This system processes candidates across all industries (Tech, Sales, Digital Mar
 Title: ${job.title}
 Department: ${job.department || 'N/A'}
 Required Experience (Years): ${job.experienceMin ?? 0} to ${job.experienceMax ?? 'Any'}
-Description: ${job.description}
+Description: ${job.description || 'Full-time role matching job title and requirements.'}
 
 --- CANDIDATE RESUME TEXT ---
 ${resumeText}
@@ -151,15 +150,22 @@ Return ONLY a JSON object with this exact structure:
 
         const result = await model.generateContent(prompt);
         const responseText = result.response.text();
-        const parsed = JSON.parse(responseText) as GeminiAnalysisResult;
-        this.logger.log(`Gemini analysis succeeded using model: ${modelName}`);
+        let cleanJson = responseText.trim();
+        if (cleanJson.startsWith('```')) {
+          cleanJson = cleanJson.replace(/^```[a-zA-Z]*\n?/, '').replace(/\n?```$/, '').trim();
+        }
+        const parsed = JSON.parse(cleanJson) as GeminiAnalysisResult;
+        if (typeof parsed.atsScore === 'number') {
+          parsed.atsScore = Math.max(0, Math.min(100, Math.round(parsed.atsScore)));
+        }
+        this.logger.log(`Gemini analysis succeeded using model: ${modelName}. Score: ${parsed.atsScore}`);
         return parsed;
       } catch (error: any) {
         this.logger.warn(`Gemini model '${modelName}' attempt failed: ${error.message}. Trying next fallback model.`);
       }
     }
 
-    this.logger.error('All Gemini Flash candidate models failed. Falling back to local deterministic engine.');
+    this.logger.error('All Gemini Flash candidate models failed.');
     return null;
   }
 }

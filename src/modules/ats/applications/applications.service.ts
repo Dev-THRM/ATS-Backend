@@ -17,7 +17,6 @@ import { StageTransitionService } from '../../shared/pipelines/stage-transition.
 import { CalendarService } from '../interviews/calendar.service.js';
 import { ResumesService } from '../resumes/resumes.service.js';
 import {
-  RESUME_QUEUE,
   NOTIFICATION_QUEUE,
 } from '../../shared/queue/queue.module.js';
 import { CandidateNotificationWorker } from '../notifications/candidate-notification.worker.js';
@@ -38,7 +37,6 @@ export class ApplicationsService {
     private readonly stageTransitionService: StageTransitionService,
     @Optional() @Inject(CalendarService) private readonly calendarService?: CalendarService,
     @Optional() @Inject(ResumesService) private readonly resumesService?: ResumesService,
-    @Optional() @InjectQueue(RESUME_QUEUE) private readonly resumeQueue?: Queue,
     @Optional()
     @InjectQueue(NOTIFICATION_QUEUE)
     private readonly notificationQueue?: Queue,
@@ -189,7 +187,7 @@ export class ApplicationsService {
       notes: 'Initial application submission',
     });
 
-    // If candidate has a resumeUrl/resumeKey, enqueue resume parsing job
+    // Resolve resume keys
     const resumeKey =
       (dto.metadata as Record<string, any>)?.resumeKey ||
       (candidateRecord?.resumeUrl?.includes('resumes/')
@@ -199,15 +197,20 @@ export class ApplicationsService {
     const effectiveResumeUrl =
       (dto.metadata as Record<string, any>)?.resumeUrl || candidateRecord?.resumeUrl;
 
-    if ((resumeKey || effectiveResumeUrl) && this.resumeQueue) {
-      await this.resumeQueue.add('parse-resume', {
-        organizationId,
-        candidateId,
-        jobId: dto.jobId,
-        applicationId: application.id,
-        resumeKey: resumeKey || 'external',
-        resumeUrl: effectiveResumeUrl,
-      });
+    // Run immediate inline Gemini AI scoring
+    if (this.resumesService && (resumeKey || effectiveResumeUrl || candidateRecord)) {
+      try {
+        await this.resumesService.runInlineScoring({
+          organizationId,
+          candidateId,
+          applicationId: application.id,
+          jobId: dto.jobId,
+          resumeKey: resumeKey || (effectiveResumeUrl ? 'external' : 'candidate-profile-context'),
+          resumeUrl: effectiveResumeUrl || undefined,
+        });
+      } catch (err: any) {
+        this.logger.error(`Immediate inline scoring failed on application create: ${err.message}`);
+      }
     }
 
     // Dispatch candidate application receipt notification
@@ -661,45 +664,22 @@ export class ApplicationsService {
 
     const effectiveResumeUrl = rawResume || app.candidate?.resumeUrl || undefined;
 
-    // Try BullMQ queue first
-    let queuedSuccessfully = false;
-    if (this.resumeQueue) {
-      try {
-        await this.resumeQueue.add('parse-resume', {
-          organizationId,
-          candidateId: app.candidateId,
-          jobId: app.jobId,
-          applicationId: app.id,
-          resumeKey: effectiveResumeKey,
-          resumeUrl: effectiveResumeUrl,
-        });
-        queuedSuccessfully = true;
-        this.logger.log(`Reparse queued via BullMQ for application ${applicationId}`);
-      } catch (queueErr: any) {
-        this.logger.warn(
-          `BullMQ queue unavailable on reparse (${queueErr.message}). Running inline scoring fallback.`,
-        );
-      }
+    if (!this.resumesService) {
+      throw new BadRequestException('Scoring service is currently unavailable.');
     }
 
-    // Inline fallback when queue is unavailable or synchronous completion desired
-    if (!queuedSuccessfully && this.resumesService) {
-      this.logger.log(`Running inline reparse for application ${applicationId}`);
-      try {
-        await this.resumesService.runInlineScoring({
-          organizationId,
-          resumeKey: effectiveResumeKey,
-          resumeUrl: effectiveResumeUrl,
-          candidateId: app.candidateId,
-          applicationId: app.id,
-        });
-      } catch (err: any) {
-        this.logger.error(`Inline reparse error for application ${applicationId}: ${err.message}`, err.stack);
-      }
-    } else if (!queuedSuccessfully) {
-      throw new BadRequestException(
-        'Resume queue is currently unavailable and inline scoring service could not be initialised.',
-      );
+    this.logger.log(`Running immediate Gemini AI scoring for application ${applicationId}`);
+    try {
+      await this.resumesService.runInlineScoring({
+        organizationId,
+        resumeKey: effectiveResumeKey,
+        resumeUrl: effectiveResumeUrl,
+        candidateId: app.candidateId,
+        applicationId: app.id,
+        jobId: app.jobId,
+      });
+    } catch (err: any) {
+      this.logger.error(`Inline scoring error for application ${applicationId}: ${err.message}`, err.stack);
     }
 
     // Retrieve freshly updated application with score

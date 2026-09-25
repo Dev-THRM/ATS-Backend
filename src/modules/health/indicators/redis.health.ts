@@ -26,12 +26,10 @@ export class RedisHealthIndicator extends HealthIndicator {
         return this.getStatus(key, true);
       }
 
-      throw new Error(`Unexpected Redis response: ${ping}`);
+      return this.getStatus(key, true, { status: 'optional_disabled', message: `Redis ping: ${ping}` });
     } catch (error: any) {
-      throw new HealthCheckError(
-        'Redis health check failed',
-        this.getStatus(key, false, { message: error.message }),
-      );
+      // Redis is optional since BullMQ was removed - do not fail the overall application check
+      return this.getStatus(key, true, { status: 'disabled', message: 'Redis removed or not connected' });
     }
   }
 }

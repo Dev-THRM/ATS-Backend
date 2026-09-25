@@ -13,7 +13,6 @@ import { ResumesService } from './resumes/resumes.service.js';
 import { ResumeParserService } from './parser/resume-parser.service.js';
 import { AiDetectorService } from './parser/ai-detector.service.js';
 import { GeminiParserService } from './parser/gemini-parser.service.js';
-import { ResumeProcessorWorker } from './parser/resume-processor.worker.js';
 import { NotificationsModule } from './notifications/notifications.module.js';
 import { CalendarService } from './interviews/calendar.service.js';
 import { InterviewsController } from './interviews/interviews.controller.js';
@@ -41,7 +40,6 @@ import { PublicCareerService } from './public/public-career.service.js';
     ResumeParserService,
     AiDetectorService,
     GeminiParserService,
-    ResumeProcessorWorker,
     ApplicationsService,
     CalendarService,
     InterviewsService,
@@ -58,7 +56,6 @@ import { PublicCareerService } from './public/public-career.service.js';
     ResumeParserService,
     AiDetectorService,
     GeminiParserService,
-    ResumeProcessorWorker,
     CalendarService,
     InterviewsService,
     AtsDashboardService,
