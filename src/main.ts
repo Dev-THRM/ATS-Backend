@@ -59,6 +59,8 @@ async function bootstrap() {
   const allowedOrigins = allowedOriginsEnv
     ? allowedOriginsEnv.split(',').map((o) => o.trim()).filter(Boolean)
     : [
+        'https://thrmuniverse.in',
+        'https://www.thrmuniverse.in',
         'http://localhost:5173',
         'http://localhost:3000',
         'http://localhost:8081',
@@ -110,7 +112,7 @@ async function bootstrap() {
 
   // Setup Swagger / OpenAPI Documentation
   const swaggerConfig = new DocumentBuilder()
-    .setTitle('ATS Platform API')
+    .setTitle('THRM Universe ATS API')
     .setDescription(
       'Multi-tenant enterprise ATS backend with AI resume scoring, candidate WhatsApp messaging, and interview scheduling.',
     )
