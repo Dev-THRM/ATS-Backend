@@ -107,7 +107,7 @@ ${resumeText}
 
 2. CANDIDATE DETAILS EXTRACTION:
    - Extract First Name, Last Name, Email, Phone, Location, LinkedIn URL, GitHub URL / Portfolio URL.
-   - Extract relevant skills, competencies, and tools matching the candidate's field (e.g. Sales Outreach, Client Communication, Canva, Social Media, Reels, SEO, Python, etc.).
+   - Extract ONLY the skills, competencies, and tools that are EXPLICITLY MENTIONED in the candidate's resume text. STRICT RULE: DO NOT invent, assume, or copy any skills from the TARGET JOB DETAILS. If a skill is not written in the candidate resume, DO NOT include it in "skills".
    - Calculate total years of professional experience (0 for freshers/students).
    - Extract education degrees.
 

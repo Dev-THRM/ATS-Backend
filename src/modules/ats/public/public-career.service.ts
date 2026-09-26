@@ -549,25 +549,7 @@ export class PublicCareerService {
       initialSkills = rawSkillsField.split(/[,;\n\r|•]+/).map((s) => s.trim()).filter(Boolean);
     }
 
-    if (initialSkills.length === 0 && matchedJobs.length > 0) {
-      for (const j of matchedJobs) {
-        const titleLower = j.title.toLowerCase();
-        if (titleLower.includes('content') || titleLower.includes('creator')) {
-          initialSkills.push('Content Creation', 'Social Media Marketing', 'Video Editing', 'Reels');
-        } else if (titleLower.includes('business') || titleLower.includes('bde') || titleLower.includes('sales')) {
-          initialSkills.push('Business Development', 'Client Communication', 'Lead Generation', 'Sales Outreach');
-        } else if (titleLower.includes('human resources') || titleLower.includes('hr') || titleLower.includes('talent')) {
-          initialSkills.push('Human Resources', 'Talent Acquisition', 'Recruitment', 'Employee Engagement', 'HR Operations');
-        } else if (titleLower.includes('seo') || titleLower.includes('search')) {
-          initialSkills.push('SEO', 'Keyword Research', 'Google Analytics', 'Digital Marketing');
-        } else if (titleLower.includes('developer') || titleLower.includes('engineer') || titleLower.includes('software')) {
-          initialSkills.push('JavaScript', 'TypeScript', 'React', 'Node.js');
-        } else if (titleLower.includes('marketing')) {
-          initialSkills.push('Digital Marketing', 'Social Media', 'Content Strategy', 'Brand Outreach');
-        }
-      }
-      initialSkills = Array.from(new Set(initialSkills));
-    }
+    // Skills must come strictly from the candidate resume or form response, never invented from job titles.
 
     // 1. Find or create candidate record
     const candidate = await this.candidatesService.findOrCreate(org.id, {

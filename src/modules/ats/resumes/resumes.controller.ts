@@ -118,6 +118,21 @@ export class ResumesController {
     return this.resumesService.attachResume(orgId, dto);
   }
 
+  @Post('re-extract-all')
+  @HttpCode(HttpStatus.OK)
+  @Roles(
+    SystemRoleType.SUPER_ADMIN,
+    SystemRoleType.ADMIN,
+    SystemRoleType.RECRUITER,
+    SystemRoleType.MANAGER,
+  )
+  @Permissions('resumes:upload')
+  reExtractAllCandidateSkills(
+    @CurrentUser('organizationId') orgId: string,
+  ) {
+    return this.resumesService.reExtractAllCandidateSkills(orgId);
+  }
+
   /**
    * Local-Safe Mock PUT Handler for Local Development testing.
    */

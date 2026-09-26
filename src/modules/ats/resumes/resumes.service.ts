@@ -346,13 +346,39 @@ export class ResumesService {
             this.logger.warn(`Inline scoring: file not found in storage for key: ${resumeKey}`);
           }
         }
+
+        // If still no fileBuffer, try opts.resumeUrl
+        if (!fileBuffer && opts.resumeUrl && !opts.resumeUrl.includes('drive.google.com')) {
+          try {
+            fileBuffer = await this.storageService.getFileBuffer(opts.resumeUrl);
+          } catch {
+            if (opts.resumeUrl.startsWith('http')) {
+              try {
+                const res = await fetch(opts.resumeUrl);
+                if (res.ok) {
+                  const contentType = res.headers.get('content-type') || '';
+                  if (!contentType.includes('text/html')) {
+                    const arrayBuf = await res.arrayBuffer();
+                    fileBuffer = Buffer.from(arrayBuf);
+                  }
+                }
+              } catch (fetchErr: any) {
+                this.logger.warn(`Inline scoring: direct fetch of resumeUrl failed: ${fetchErr.message}`);
+              }
+            }
+          }
+        }
       }
 
       // 2. Extract raw text from buffer if available
       let rawText = '';
+      let hasRealResume = false;
       if (fileBuffer && fileBuffer.length > 0) {
         try {
           rawText = await this.resumeParser.extractTextFromBuffer(fileBuffer, mimeType);
+          if (rawText && rawText.trim().length >= 20) {
+            hasRealResume = true;
+          }
         } catch (err: any) {
           this.logger.warn(`Inline scoring: failed buffer extraction: ${err.message}`);
         }
@@ -416,7 +442,7 @@ export class ResumesService {
         }
       }
 
-      // Fallback: If resume text could not be extracted, synthesize from candidate profile and application context
+      // Fallback: If resume text could not be extracted, synthesize only from candidate profile context (NEVER include job description so skills aren't fabricated)
       if (!rawText || rawText.trim().length < 20) {
         this.logger.log(`Inline scoring: synthesizing candidate profile context for scoring`);
         const cand = candidateId
@@ -428,15 +454,11 @@ export class ResumesService {
           candidateName ? `Candidate Name: ${candidateName}` : '',
           cand?.currentTitle ? `Current Title / Role: ${cand.currentTitle}` : '',
           cand?.currentCompany ? `Current Company: ${cand.currentCompany}` : '',
-          cand?.skills?.length ? `Skills & Competencies: ${cand.skills.join(', ')}` : '',
           cand?.location ? `Location: ${cand.location}` : '',
           cand?.phone ? `Phone: ${cand.phone}` : '',
           cand?.email ? `Email: ${cand.email}` : '',
           cand?.source ? `Sourcing Channel: ${cand.source}` : '',
           application?.coverLetter ? `Cover Letter / Statement: ${application.coverLetter}` : '',
-          targetJob?.title ? `Target Role: ${targetJob.title}` : '',
-          targetJob?.department ? `Department: ${targetJob.department}` : '',
-          targetJob?.description ? `Target Job Description & Requirements: ${targetJob.description}` : '',
         ].filter(Boolean);
 
         rawText = fallbackParts.join('\n\n');
@@ -532,24 +554,22 @@ export class ResumesService {
         );
       }
 
-      // 6. Merge and update candidate skills
-      const skillsToSave = parsedSkills.length > 0
+      // 6. Update candidate skills (STRICT: ONLY FROM ACTUAL RESUME)
+      const skillsToSave = (hasRealResume && parsedSkills.length > 0)
         ? parsedSkills
-        : (Array.isArray(atsScoreBreakdown.matchedSkills) && atsScoreBreakdown.matchedSkills.length > 0)
-          ? atsScoreBreakdown.matchedSkills
-          : [];
+        : [];
 
-      if (candidateId && skillsToSave.length > 0) {
+      if (candidateId && hasRealResume) {
         const existingCandidate = await this.prisma.candidate.findFirst({
           where: { id: candidateId, ...(organizationId ? { organizationId } : {}) },
         });
 
         if (existingCandidate) {
-          const mergedSkills = Array.from(new Set([...existingCandidate.skills, ...skillsToSave]));
+          // Overwrite with clean skills strictly extracted from the resume
           await this.prisma.candidate.update({
             where: { id: candidateId },
             data: {
-              skills: mergedSkills,
+              skills: skillsToSave,
               ...(candidateExtracted.phone && !existingCandidate.phone
                 ? { phone: candidateExtracted.phone }
                 : {}),
@@ -593,5 +613,91 @@ export class ResumesService {
     } catch (error: any) {
       this.logger.error(`Inline scoring failed for key ${resumeKey}: ${error.message}`, error.stack);
     }
+  }
+
+  /**
+   * Re-extracts skills and ATS scores for all candidates in the organization strictly from their resume documents.
+   */
+  async reExtractAllCandidateSkills(organizationId: string): Promise<{
+    totalCandidates: number;
+    processed: number;
+    updated: number;
+    errors: string[];
+  }> {
+    this.logger.log(`Starting bulk resume re-extraction for organization: ${organizationId}`);
+
+    const candidates = await this.prisma.candidate.findMany({
+      where: { organizationId },
+      include: {
+        applications: {
+          include: {
+            job: true,
+          },
+          orderBy: { createdAt: 'desc' },
+        },
+      },
+    });
+
+    let processed = 0;
+    let updated = 0;
+    const errors: string[] = [];
+
+    for (const cand of candidates) {
+      processed++;
+      try {
+        const activeApp = cand.applications[0];
+        const rawMeta = (activeApp?.metadata as Record<string, any>) || {};
+        const rawResume =
+          cand.resumeUrl ||
+          rawMeta.resumeUrl ||
+          rawMeta.resumeKey ||
+          '';
+
+        if (!rawResume) {
+          continue;
+        }
+
+        let resolvedResumeKey = '';
+        if (rawResume.includes('resumes/')) {
+          const parts = rawResume.split('resumes/');
+          resolvedResumeKey = 'resumes/' + parts[parts.length - 1].split('?')[0];
+        } else if (rawResume && !rawResume.startsWith('http')) {
+          resolvedResumeKey = rawResume
+            .replace(/^\/?storage\//, '')
+            .replace(/^\\?storage\\/, '')
+            .replace(/^[/\\]+/, '')
+            .split('?')[0];
+        }
+
+        const effectiveResumeKey =
+          resolvedResumeKey ||
+          (rawResume.includes('drive.google.com') ? 'google-drive-link' : 'candidate-profile-context');
+
+        await this.runInlineScoring({
+          organizationId,
+          resumeKey: effectiveResumeKey,
+          resumeUrl: rawResume,
+          candidateId: cand.id,
+          applicationId: activeApp?.id,
+          jobId: activeApp?.jobId,
+        });
+
+        updated++;
+      } catch (err: any) {
+        this.logger.error(`Failed to re-extract skills for candidate ${cand.id}: ${err.message}`);
+        errors.push(`Candidate ${cand.firstName} ${cand.lastName}: ${err.message}`);
+      }
+    }
+
+    this.logger.log(
+      `Finished bulk resume re-extraction for org ${organizationId}: ${updated}/${processed} processed.`,
+    );
+
+    return {
+      totalCandidates: candidates.length,
+      processed,
+      updated,
+      errors,
+    };
   }
 }

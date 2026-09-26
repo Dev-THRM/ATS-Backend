@@ -191,12 +191,13 @@ export class ResumeParserService {
     }
 
     // 2. Heuristic extraction from explicit "SKILLS" section in resume
-    const skillsSectionMatch = text.match(/(?:SKILLS|TECHNICAL SKILLS|CORE COMPETENCIES|KEY SKILLS)[:\n\r]+([^\n\r]+(?:\n[^\n\r]+){0,3})/i);
+    const skillsSectionMatch = text.match(/(?:SKILLS|TECHNICAL SKILLS|CORE COMPETENCIES|KEY SKILLS)[:\n\r]+([\s\S]{1,400}?)(?=(?:\n\s*(?:EXPERIENCE|WORK EXPERIENCE|EMPLOYMENT|EDUCATION|PROJECTS|CERTIFICATIONS|LEADERSHIP|ACHIEVEMENTS|AWARDS|LANGUAGES|SUMMARY|INTERESTS|REFERENCES|HOBBIES)\b)|\n\n|\r\n\r\n|$)/i);
     if (skillsSectionMatch && skillsSectionMatch[1]) {
+      const nonSkillKeywords = /^(leadership|co-curricular|activities|head|student|committee|cell|co-ordination|placement|responsibilities|achievements|projects|education|experience)$/i;
       const extractedRaw = skillsSectionMatch[1]
         .split(/[,•|·\n\r]/)
         .map((s) => s.trim().replace(/^[-*•]\s*/, ''))
-        .filter((s) => s.length > 2 && s.length < 40 && !/^(and|or|with|the)$/i.test(s));
+        .filter((s) => s.length > 2 && s.length < 35 && !/^(and|or|with|the|in|at|of|for)$/i.test(s) && !nonSkillKeywords.test(s));
 
       for (const item of extractedRaw) {
         if (!skills.has(item)) {

@@ -120,19 +120,21 @@ export class ResumeProcessorWorker extends WorkerHost {
 
       // 2. Extract raw text
       let rawText = '';
+      let hasRealResume = false;
       if (fileBuffer && fileBuffer.length > 0) {
         rawText = await this.resumeParser.extractTextFromBuffer(fileBuffer);
+        if (rawText && rawText.trim().length >= 20) {
+          hasRealResume = true;
+        }
       }
 
       // Fallback: If resume text could not be extracted (e.g. Google Drive sign-in wall or image PDF),
-      // utilize cover letter, candidate notes, and target job keywords to ensure skills extraction.
+      // synthesize profile info only (do NOT include target job description to avoid skill hallucination)
       if (!rawText || rawText.trim().length === 0) {
-        this.logger.warn(`No raw text from buffer for ${resumeKey}. Falling back to application & job context.`);
+        this.logger.warn(`No raw text from buffer for ${resumeKey}. Falling back to application candidate profile.`);
         const fallbackParts = [
           application?.coverLetter || '',
           application?.candidate?.currentTitle || '',
-          targetJob?.title || '',
-          targetJob?.description || '',
         ].filter(Boolean);
 
         rawText = fallbackParts.join('\n');
@@ -227,28 +229,22 @@ export class ResumeProcessorWorker extends WorkerHost {
         );
       }
 
-      // 5. ACTION: UPDATE CANDIDATE & APPLICATION SKILLS
-      const skillsToSave = parsedSkills.length > 0
+      // 5. ACTION: UPDATE CANDIDATE & APPLICATION SKILLS (STRICT: ONLY FROM RESUME)
+      const skillsToSave = (hasRealResume && parsedSkills.length > 0)
         ? parsedSkills
-        : (Array.isArray(atsScoreBreakdown.matchedSkills) && atsScoreBreakdown.matchedSkills.length > 0)
-          ? atsScoreBreakdown.matchedSkills
-          : [];
+        : [];
 
-      if (candidateId && skillsToSave.length > 0) {
+      if (candidateId && hasRealResume) {
         const effectiveOrgId = organizationId || application?.organizationId;
         const existingCandidate = await this.prisma.candidate.findFirst({
           where: { id: candidateId, ...(effectiveOrgId ? { organizationId: effectiveOrgId } : {}) },
         });
 
         if (existingCandidate) {
-          const mergedSkills = Array.from(
-            new Set([...existingCandidate.skills, ...skillsToSave]),
-          );
-
           await this.prisma.candidate.update({
             where: { id: candidateId },
             data: {
-              skills: mergedSkills,
+              skills: skillsToSave,
               ...(candidateExtracted.phone && !existingCandidate.phone
                 ? { phone: candidateExtracted.phone }
                 : {}),
