@@ -30,6 +30,7 @@ export class StorageService {
   private readonly s3Client?: S3Client;
   private readonly bucketName?: string;
   private readonly publicUrl?: string;
+  private readonly backendUrl?: string;
   private readonly isR2Enabled: boolean;
   private readonly localStorageDir: string;
 
@@ -39,6 +40,7 @@ export class StorageService {
     const secretAccessKey = this.config.get<string>('R2_SECRET_ACCESS_KEY');
     this.bucketName = this.config.get<string>('R2_BUCKET_NAME');
     this.publicUrl = this.config.get<string>('R2_PUBLIC_URL');
+    this.backendUrl = (this.config.get<string>('BACKEND_URL') || '').trim().replace(/\/+$/, '');
 
     this.localStorageDir = path.resolve(process.cwd(), 'storage');
 
@@ -63,6 +65,11 @@ export class StorageService {
 
   isR2Active(): boolean {
     return this.isR2Enabled;
+  }
+
+  private getLocalUrl(key: string): string {
+    const cleanKey = key.startsWith('/') ? key.slice(1) : key;
+    return this.backendUrl ? `${this.backendUrl}/storage/${cleanKey}` : `/storage/${cleanKey}`;
   }
 
   /**
@@ -102,7 +109,7 @@ export class StorageService {
       uploadUrl: localUrl,
       key,
       expiresInSeconds,
-      publicUrl: `/storage/${key}`,
+      publicUrl: this.getLocalUrl(key),
     };
   }
 
@@ -125,7 +132,7 @@ export class StorageService {
     }
 
     // Local dev mode fallback
-    return `/storage/${key}`;
+    return this.getLocalUrl(key);
   }
 
   /**
@@ -157,7 +164,7 @@ export class StorageService {
 
     return {
       key: params.key,
-      url: `/storage/${params.key}`,
+      url: this.getLocalUrl(params.key),
     };
   }
 
