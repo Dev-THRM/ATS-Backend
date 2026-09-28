@@ -361,11 +361,14 @@ export class InterviewsService {
   ) {
     await this.findOne(organizationId, interviewId);
 
+    const rating = dto.rating ?? dto.feedbackRating ?? 5;
+    const notes = dto.notes ?? dto.feedbackNotes ?? '';
+
     return this.prisma.interview.update({
       where: { id: interviewId },
       data: {
-        feedbackRating: dto.rating,
-        feedbackNotes: dto.notes,
+        feedbackRating: rating,
+        feedbackNotes: notes,
         status: InterviewStatus.COMPLETED,
       },
       include: {

@@ -1,6 +1,5 @@
 import {
   IsString,
-  IsNotEmpty,
   IsOptional,
   IsNumber,
   Min,
@@ -10,13 +9,24 @@ import { Type } from 'class-transformer';
 
 export class SubmitInterviewFeedbackDto {
   @IsNumber()
-  @IsNotEmpty()
+  @IsOptional()
   @Min(1)
   @Max(5)
   @Type(() => Number)
-  rating: number;
+  rating?: number;
+
+  @IsNumber()
+  @IsOptional()
+  @Min(1)
+  @Max(5)
+  @Type(() => Number)
+  feedbackRating?: number;
 
   @IsString()
   @IsOptional()
   notes?: string;
+
+  @IsString()
+  @IsOptional()
+  feedbackNotes?: string;
 }
