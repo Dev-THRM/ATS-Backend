@@ -21,6 +21,6 @@ export class AppController {
       res.setHeader('Content-Disposition', 'attachment; filename="thrm-universe-ats.apk"');
       return res.sendFile(localApk);
     }
-    return res.redirect('https://api.thrmuniverse.in/storage/downloads/thrm-universe-ats.apk');
+    return res.redirect('https://expo.dev/artifacts/eas/l1iHUTLN4oK_uRt0srgyQ8hfJ1dXyYxhSH5YdmCNdiM.apk');
   }
 }
