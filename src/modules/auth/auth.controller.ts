@@ -115,7 +115,7 @@ export class AuthController {
    */
   @Public()
   @Post('forgot-password')
-  @Throttle({ default: { limit: 5, ttl: 60000 } })
+  @Throttle({ default: { limit: 20, ttl: 60000 } })
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Request password reset token sent via email' })
   @ApiResponse({ status: 200, description: 'Reset request received; instructions dispatched if account exists.' })
@@ -131,7 +131,7 @@ export class AuthController {
    */
   @Public()
   @Post('reset-password')
-  @Throttle({ default: { limit: 5, ttl: 60000 } })
+  @Throttle({ default: { limit: 20, ttl: 60000 } })
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Reset account password with a valid reset token' })
   @ApiResponse({ status: 200, description: 'Password reset successful.' })

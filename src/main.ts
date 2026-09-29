@@ -76,23 +76,48 @@ async function bootstrap() {
     ) => {
       // Allow requests with no origin (mobile apps, curl, server-to-server, health checks)
       if (!origin) return callback(null, true);
-      if (allowedOrigins.includes('*') || allowedOrigins.includes(origin)) {
-        return callback(null, true);
-      }
-      // In development, be permissive of localhost, 127.0.0.1 and private LAN addresses (for mobile device testing)
+
+      const normalizedOrigin = origin.replace(/\/+$/, '');
+
+      // Allow any thrmuniverse.in domain (including apex, www, api, etc.)
       if (
-        process.env.NODE_ENV !== 'production' &&
-        (origin.startsWith('http://localhost:') ||
-          origin.startsWith('http://127.0.0.1:') ||
-          /^https?:\/\/(192\.168|10\.|172\.(1[6-9]|2[0-9]|3[0-1]))\./.test(origin))
+        normalizedOrigin === 'https://thrmuniverse.in' ||
+        normalizedOrigin === 'https://www.thrmuniverse.in' ||
+        normalizedOrigin === 'https://api.thrmuniverse.in' ||
+        /\.thrmuniverse\.in$/.test(normalizedOrigin) ||
+        allowedOrigins.includes('*') ||
+        allowedOrigins.some((o) => o.replace(/\/+$/, '') === normalizedOrigin)
       ) {
         return callback(null, true);
       }
-      return callback(new Error(`CORS blocked for origin: ${origin}`));
+
+      // In development, be permissive of localhost, 127.0.0.1 and private LAN addresses (for mobile device testing)
+      if (
+        process.env.NODE_ENV !== 'production' &&
+        (normalizedOrigin.startsWith('http://localhost:') ||
+          normalizedOrigin.startsWith('http://127.0.0.1:') ||
+          /^https?:\/\/(192\.168|10\.|172\.(1[6-9]|2[0-9]|3[0-1]))\./.test(normalizedOrigin))
+      ) {
+        return callback(null, true);
+      }
+
+      return callback(null, false);
     },
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept'],
+    allowedHeaders: [
+      'Content-Type',
+      'Authorization',
+      'X-Requested-With',
+      'Accept',
+      'Origin',
+      'sentry-trace',
+      'baggage',
+      'Cache-Control',
+      'Pragma',
+      'Expires',
+      'X-Client-Version',
+    ],
   });
 
   // Global prefix for versioned APIs
