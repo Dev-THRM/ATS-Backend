@@ -44,9 +44,10 @@ export class RolesGuard implements CanActivate {
       );
     }
 
-    // Super Admin or wildcard '*' permission has unrestricted access
+    // Super Admin, Admin or wildcard '*' permission has unrestricted access
     if (
       user.roleType === SystemRoleType.SUPER_ADMIN ||
+      user.roleType === SystemRoleType.ADMIN ||
       user.permissions?.includes('*')
     ) {
       return true;
