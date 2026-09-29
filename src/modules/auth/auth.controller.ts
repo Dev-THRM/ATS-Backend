@@ -30,6 +30,7 @@ import { RefreshTokenDto } from './dto/refresh-token.dto.js';
 import { UpdateOrganizationDto } from './dto/update-organization.dto.js';
 import { ForgotPasswordDto } from './dto/forgot-password.dto.js';
 import { ResetPasswordDto } from './dto/reset-password.dto.js';
+import { ChangePasswordDto } from './dto/change-password.dto.js';
 import { AddMemberDto } from './dto/add-member.dto.js';
 import { UpdateMemberDto } from './dto/update-member.dto.js';
 import { Public } from '../../common/decorators/public.decorator.js';
@@ -139,6 +140,22 @@ export class AuthController {
     @Body() dto: ResetPasswordDto,
   ): Promise<{ message: string }> {
     return this.authService.resetPassword(dto);
+  }
+
+  /**
+   * Change current user's password
+   * Example: POST /api/v1/auth/change-password
+   */
+  @Post('change-password')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Change password for currently authenticated user' })
+  @ApiResponse({ status: 200, description: 'Password changed successfully.' })
+  @ApiResponse({ status: 400, description: 'Current password does not match or invalid password.' })
+  async changePassword(
+    @CurrentUser('userId') userId: string,
+    @Body() dto: ChangePasswordDto,
+  ): Promise<{ message: string }> {
+    return this.authService.changePassword(userId, dto);
   }
 
   /**

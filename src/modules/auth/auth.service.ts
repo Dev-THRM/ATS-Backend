@@ -21,6 +21,7 @@ import { RefreshTokenDto } from './dto/refresh-token.dto.js';
 import { UpdateOrganizationDto } from './dto/update-organization.dto.js';
 import { ForgotPasswordDto } from './dto/forgot-password.dto.js';
 import { ResetPasswordDto } from './dto/reset-password.dto.js';
+import { ChangePasswordDto } from './dto/change-password.dto.js';
 import { AddMemberDto } from './dto/add-member.dto.js';
 import { UpdateMemberDto } from './dto/update-member.dto.js';
 import {
@@ -842,6 +843,43 @@ export class AuthService {
 
     return {
       message: 'Your password has been successfully reset. Please log in with your new credentials.',
+    };
+  }
+
+  /**
+   * Change password for currently authenticated user
+   */
+  async changePassword(
+    userId: string,
+    dto: ChangePasswordDto,
+  ): Promise<{ message: string }> {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+    });
+    if (!user) {
+      throw new NotFoundException('User account not found.');
+    }
+
+    const isMatch = await bcrypt.compare(dto.currentPassword, user.passwordHash);
+    if (!isMatch) {
+      throw new BadRequestException('Current password does not match.');
+    }
+
+    if (dto.currentPassword === dto.newPassword) {
+      throw new BadRequestException('New password cannot be the same as your current password.');
+    }
+
+    const newHash = await bcrypt.hash(dto.newPassword, 12);
+
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: {
+        passwordHash: newHash,
+      },
+    });
+
+    return {
+      message: 'Password changed successfully.',
     };
   }
 

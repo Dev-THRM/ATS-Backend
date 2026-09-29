@@ -53,7 +53,7 @@ async function main() {
   console.log('Super Admin Role ID:', superAdminRole.id);
   console.log('Admin Role ID:', adminRole.id, 'Permissions:', adminRole.permissions);
 
-  const defaultTempPasswordHash = await bcrypt.hash('Admin@123', 12);
+  const defaultTempPasswordHash = await bcrypt.hash('Thrm@0205', 12);
 
   // 2. Ensure dev@thrmdigitalmarketing.in is Super Admin
   const devUser = await prisma.user.findFirst({
