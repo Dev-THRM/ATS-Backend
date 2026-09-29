@@ -768,8 +768,11 @@ export class AuthService {
         },
       });
 
-      const frontendUrl = this.configService.get<string>('APP_URL') || 'http://localhost:5173';
-      const resetLink = `${frontendUrl}/reset-password?token=${rawToken}`;
+      const frontendUrl =
+        this.configService.get<string>('APP_URL') ||
+        process.env.APP_URL ||
+        'https://thrmuniverse.in';
+      const resetLink = `${frontendUrl.replace(/\/+$/, '')}/reset-password?token=${rawToken}`;
       const companyName = user.organization?.name || 'ATS Platform';
 
       const emailService = this.emailService || new EmailService();
@@ -1044,8 +1047,11 @@ export class AuthService {
     });
 
     // Send invitation email
-    const frontendUrl = this.configService.get<string>('APP_URL') || 'http://localhost:5173';
-    const loginUrl = `${frontendUrl}/login?organizationSlug=${requester.organization.slug}`;
+    const frontendUrl =
+      this.configService.get<string>('APP_URL') ||
+      process.env.APP_URL ||
+      'https://thrmuniverse.in';
+    const loginUrl = `${frontendUrl.replace(/\/+$/, '')}/login?organizationSlug=${requester.organization.slug}`;
     const emailService = this.emailService || new EmailService();
 
     void emailService.sendMail({
