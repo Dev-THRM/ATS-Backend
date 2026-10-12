@@ -20,6 +20,7 @@ import { InterviewsService } from './interviews/interviews.service.js';
 import { AtsDashboardService } from './ats-dashboard.service.js';
 import { PublicCareerController } from './public/public-career.controller.js';
 import { PublicCareerService } from './public/public-career.service.js';
+import { PublicInquiryController } from './public/public-inquiry.controller.js';
 
 @Module({
   imports: [SharedModule, NotificationsModule],
@@ -31,6 +32,7 @@ import { PublicCareerService } from './public/public-career.service.js';
     ResumesController,
     InterviewsController,
     PublicCareerController,
+    PublicInquiryController,
   ],
   providers: [
     JobsService,

@@ -729,6 +729,276 @@ ${companyName}`;
 
     return { subject, html, text };
   }
+
+  /**
+   * Template: Admin notification email sent to dev@thrmdigitalmarketing.in when a visitor
+   * submits the "Request Custom Walkthrough & Quote" form on the ATS landing page.
+   */
+  renderContactInquiryAdminEmail(params: ContactInquiryEmailParams): RenderedEmail {
+    const { name, email, company, phone, message } = params;
+    const companyDisplay = company?.trim() || 'Organization Not Specified';
+    const subject = `New Inquiry: Walkthrough & Quote Request - ${name} (${companyDisplay})`;
+
+    const text = `NEW ENTERPRISE INQUIRY: THRM ATS WALKTHROUGH & QUOTE
+
+A new request has been submitted through the ATS portal.
+
+Contact Details:
+- Name: ${name}
+- Work Email: ${email}
+- Company: ${companyDisplay}
+- Phone: ${phone?.trim() || 'Not provided'}
+- Requirements: ${message?.trim() || 'No additional requirements provided'}
+
+Submitted At: ${new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })} (IST)
+Guaranteed SLA Response: Under 2 Hours
+
+--
+THRM Universe ATS Inbound Notification Engine`;
+
+    const html = `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>${subject}</title>
+</head>
+<body style="margin: 0; padding: 0; background-color: #f8fafc; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; color: #1e293b;">
+  <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color: #f8fafc; padding: 32px 16px;">
+    <tr>
+      <td align="center">
+        <table width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width: 600px; background-color: #ffffff; border-radius: 16px; border: 1px solid #e2e8f0; overflow: hidden; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05);">
+          <!-- Header Banner -->
+          <tr>
+            <td style="background: linear-gradient(135deg, #1e51da, #2563eb); padding: 32px 28px; text-align: left;">
+              <h2 style="margin: 0; color: #ffffff; font-size: 22px; font-weight: 800; letter-spacing: -0.02em;">
+                THRM ATS
+              </h2>
+              <p style="margin: 6px 0 0 0; color: #dbeafe; font-size: 14px; font-weight: 500;">
+                New Walkthrough & Custom Quote Request
+              </p>
+            </td>
+          </tr>
+
+          <!-- Content Body -->
+          <tr>
+            <td style="padding: 32px 28px;">
+              <p style="margin: 0 0 16px 0; font-size: 15px; line-height: 1.6; color: #334155;">
+                Hello Team,
+              </p>
+              <p style="margin: 0 0 20px 0; font-size: 15px; line-height: 1.6; color: #334155;">
+                A new inquiry has been submitted via the <strong>Request Custom Walkthrough & Quote</strong> form on the THRM ATS website.
+              </p>
+
+              <!-- Inquiry Details Card -->
+              <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; margin: 20px 0;">
+                <tr>
+                  <td style="padding: 20px;">
+                    <table width="100%" cellpadding="8" cellspacing="0" border="0">
+                      <tr>
+                        <td width="32%" style="font-size: 12px; font-weight: 700; color: #64748b; text-transform: uppercase;">Full Name</td>
+                        <td style="font-size: 14px; font-weight: 700; color: #0f172a;">${name}</td>
+                      </tr>
+                      <tr>
+                        <td style="font-size: 12px; font-weight: 700; color: #64748b; text-transform: uppercase;">Work Email</td>
+                        <td style="font-size: 14px;">
+                          <a href="mailto:${email}" style="color: #1e51da; font-weight: 700; text-decoration: none;">${email}</a>
+                        </td>
+                      </tr>
+                      <tr>
+                        <td style="font-size: 12px; font-weight: 700; color: #64748b; text-transform: uppercase;">Company</td>
+                        <td style="font-size: 14px; font-weight: 600; color: #334155;">${companyDisplay}</td>
+                      </tr>
+                      <tr>
+                        <td style="font-size: 12px; font-weight: 700; color: #64748b; text-transform: uppercase;">Phone / WhatsApp</td>
+                        <td style="font-size: 14px; color: #334155;">
+                          ${
+                            phone?.trim()
+                              ? `<a href="tel:${phone}" style="color: #1e51da; font-weight: 600; text-decoration: none;">${phone}</a>`
+                              : '<span style="color: #94a3b8; font-style: italic;">Not provided</span>'
+                          }
+                        </td>
+                      </tr>
+                      <tr>
+                        <td style="font-size: 12px; font-weight: 700; color: #64748b; text-transform: uppercase; vertical-align: top;">Requirements</td>
+                        <td style="font-size: 13px; color: #334155; line-height: 1.5;">
+                          ${message?.trim() || '<span style="color: #94a3b8; font-style: italic;">None specified</span>'}
+                        </td>
+                      </tr>
+                    </table>
+                  </td>
+                </tr>
+              </table>
+
+              <!-- Quick Action Button -->
+              <div style="text-align: center; margin: 28px 0 20px 0;">
+                <a href="mailto:${email}?subject=RE: THRM ATS Custom Walkthrough & Quote" style="background-color: #1e51da; color: #ffffff; padding: 12px 30px; border-radius: 10px; font-size: 14px; font-weight: 700; text-decoration: none; display: inline-block; box-shadow: 0 4px 6px -1px rgba(30,81,218,0.25);">
+                  Reply to ${name} (${email})
+                </a>
+              </div>
+
+              <!-- SLA Target Box -->
+              <div style="background-color: #eff6ff; border: 1px solid #bfdbfe; border-radius: 10px; padding: 14px 18px; margin: 20px 0;">
+                <p style="margin: 0; font-size: 13px; color: #1e40af; line-height: 1.5;">
+                  <strong>⚡ Guaranteed SLA:</strong> Under 2 Hours. Connect with this inquiry to schedule the 15-minute live demo.
+                </p>
+              </div>
+
+              <div style="margin-top: 32px; padding-top: 20px; border-top: 1px solid #f1f5f9;">
+                <p style="margin: 0; font-size: 14px; font-weight: 700; color: #0f172a;">Inbound Solutions Engine</p>
+                <p style="margin: 2px 0 0 0; font-size: 13px; color: #64748b;">THRM Universe ATS</p>
+              </div>
+            </td>
+          </tr>
+
+          <!-- Footer -->
+          <tr>
+            <td style="background-color: #f8fafc; padding: 20px 28px; border-top: 1px solid #e2e8f0; text-align: center;">
+              <p style="margin: 0; font-size: 12px; color: #94a3b8; line-height: 1.5;">
+                &copy; ${new Date().getFullYear()} THRM Universe ATS. Internal notification for dev@thrmdigitalmarketing.in.
+              </p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`;
+
+    return { subject, html, text };
+  }
+
+  /**
+   * Template: Acknowledgment email sent to the user who requested a custom walkthrough & quote.
+   */
+  renderContactInquiryAcknowledgmentEmail(params: ContactInquiryEmailParams): RenderedEmail {
+    const { name, company, email, phone } = params;
+    const companyDisplay = company?.trim() || 'your organization';
+    const subject = `Inquiry Received: Custom Walkthrough & Proposal - THRM ATS`;
+
+    const text = `Dear ${name},
+
+Thank you for your interest in THRM ATS!
+
+We have successfully received your request for a customized product walkthrough and proposal for ${companyDisplay}.
+
+Our solutions architects are reviewing your requirements and will reach out to you within 2 hours at ${email}${phone ? ` or ${phone}` : ''}.
+
+What to expect in your 15-Minute Live Walkthrough:
+- Live demonstration of AI Resume Parsing on your actual job descriptions & resumes
+- Interactive drag-and-drop Kanban pipeline setup
+- Structured interview scorecard and team feedback workflows
+- Transparent quotation customized for your hiring requirements
+
+If you need urgent assistance, feel free to reply directly to this email.
+
+Best regards,
+Talent Solutions Team
+THRM Universe ATS`;
+
+    const html = `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>${subject}</title>
+</head>
+<body style="margin: 0; padding: 0; background-color: #f8fafc; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; color: #1e293b;">
+  <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color: #f8fafc; padding: 32px 16px;">
+    <tr>
+      <td align="center">
+        <table width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width: 600px; background-color: #ffffff; border-radius: 16px; border: 1px solid #e2e8f0; overflow: hidden; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05);">
+          <!-- Header Banner -->
+          <tr>
+            <td style="background: linear-gradient(135deg, #1e51da, #2563eb); padding: 32px 28px; text-align: left;">
+              <h2 style="margin: 0; color: #ffffff; font-size: 22px; font-weight: 800; letter-spacing: -0.02em;">
+                THRM ATS
+              </h2>
+              <p style="margin: 6px 0 0 0; color: #dbeafe; font-size: 14px; font-weight: 500;">
+                Walkthrough & Proposal Request Acknowledged
+              </p>
+            </td>
+          </tr>
+
+          <!-- Content Body -->
+          <tr>
+            <td style="padding: 32px 28px;">
+              <p style="margin: 0 0 16px 0; font-size: 15px; line-height: 1.6; color: #334155;">
+                Dear <strong>${name}</strong>,
+              </p>
+              <p style="margin: 0 0 16px 0; font-size: 15px; line-height: 1.6; color: #334155;">
+                Thank you for your interest in <strong>THRM ATS</strong>. We have received your request for a personalized product demonstration and custom proposal for <strong>${companyDisplay}</strong>.
+              </p>
+              <p style="margin: 0 0 20px 0; font-size: 15px; line-height: 1.6; color: #334155;">
+                Our talent solutions team is reviewing your requirements and will connect with you at <strong>${email}</strong>${phone ? ` (or ${phone})` : ''} within <strong>2 hours</strong>.
+              </p>
+
+              <!-- Highlight Callout Box -->
+              <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color: #eff6ff; border: 1px solid #bfdbfe; border-radius: 12px; margin: 24px 0;">
+                <tr>
+                  <td style="padding: 20px;">
+                    <div style="font-size: 12px; font-weight: 700; color: #1d4ed8; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 6px;">Your Inquiry Summary</div>
+                    <div style="font-size: 15px; font-weight: 700; color: #1e3a8a;">
+                      ${companyDisplay}
+                    </div>
+                    <div style="font-size: 13px; color: #3b82f6; margin-top: 4px;">
+                      Guaranteed SLA: Response within 2 hours
+                    </div>
+                  </td>
+                </tr>
+              </table>
+
+              <!-- What to Expect -->
+              <p style="margin: 0 0 12px 0; font-size: 14px; font-weight: 700; color: #0f172a;">
+                What to expect during your 15-Minute Live Walkthrough:
+              </p>
+              <ul style="margin: 0 0 24px 0; padding-left: 20px; font-size: 14px; line-height: 1.7; color: #475569;">
+                <li>Test AI Resume Parsing live on your real job descriptions & candidate resumes</li>
+                <li>Tour the visual drag-and-drop Kanban pipeline & automated interview stages</li>
+                <li>Review structured evaluation scorecards and interviewer collaboration tools</li>
+                <li>Receive a transparent quotation customized for your hiring requirements</li>
+              </ul>
+
+              <p style="margin: 0 0 24px 0; font-size: 14px; line-height: 1.6; color: #475569;">
+                If you have urgent questions or custom contract requirements in the meantime, feel free to reply directly to this email.
+              </p>
+
+              <div style="margin-top: 32px; padding-top: 20px; border-top: 1px solid #f1f5f9;">
+                <p style="margin: 0; font-size: 14px; font-weight: 700; color: #0f172a;">Talent Solutions Team</p>
+                <p style="margin: 2px 0 0 0; font-size: 13px; color: #64748b;">THRM Universe ATS</p>
+              </div>
+            </td>
+          </tr>
+
+          <!-- Footer -->
+          <tr>
+            <td style="background-color: #f8fafc; padding: 20px 28px; border-top: 1px solid #e2e8f0; text-align: center;">
+              <p style="margin: 0; font-size: 12px; color: #94a3b8; line-height: 1.5;">
+                &copy; ${new Date().getFullYear()} THRM Universe ATS. All rights reserved.<br>
+                Official communication from THRM Universe.
+              </p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`;
+
+    return { subject, html, text };
+  }
+}
+
+export interface ContactInquiryEmailParams {
+  name: string;
+  email: string;
+  company?: string;
+  phone?: string;
+  message?: string;
 }
 
 export interface InterviewEmailParams {
