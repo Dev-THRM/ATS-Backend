@@ -9,4 +9,25 @@ export class UpdateApplicationStatusDto {
   @IsString()
   @IsOptional()
   rejectionReason?: string;
+
+  @IsString()
+  @IsOptional()
+  reason?: string;
+
+  @IsString()
+  @IsOptional()
+  joiningDate?: string;
+
+  @IsString()
+  @IsOptional()
+  customNotes?: string;
+
+  @IsString()
+  @IsOptional()
+  notes?: string;
+
+  @IsString()
+  @IsOptional()
+  note?: string;
 }
+

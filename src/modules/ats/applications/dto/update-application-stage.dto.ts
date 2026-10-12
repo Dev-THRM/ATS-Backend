@@ -1,4 +1,4 @@
-import { IsBoolean, IsNotEmpty, IsOptional, IsString } from 'class-validator';
+import { IsBoolean, IsOptional, IsString } from 'class-validator';
 import { Transform } from 'class-transformer';
 
 export class UpdateApplicationStageDto {
@@ -15,6 +15,10 @@ export class UpdateApplicationStageDto {
   @IsOptional()
   rejectionReason?: string;
 
+  @IsString()
+  @IsOptional()
+  reason?: string;
+
   @IsBoolean()
   @IsOptional()
   sendEmail?: boolean;
@@ -25,5 +29,18 @@ export class UpdateApplicationStageDto {
 
   @IsString()
   @IsOptional()
+  notes?: string;
+
+  @IsString()
+  @IsOptional()
+  note?: string;
+
+  @IsString()
+  @IsOptional()
   joiningDate?: string;
+
+  @IsString()
+  @IsOptional()
+  status?: string;
 }
+

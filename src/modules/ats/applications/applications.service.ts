@@ -701,14 +701,24 @@ export class ApplicationsService {
     applicationId: string,
     status: ApplicationStatus,
     rejectionReason?: string,
+    customNotes?: string,
+    joiningDate?: string,
   ) {
-    await this.findOne(organizationId, applicationId);
+    const app = await this.findOne(organizationId, applicationId);
+
+    const existingMeta = (app.metadata as Record<string, any>) || {};
+    const updatedMetadata = {
+      ...existingMeta,
+      ...(joiningDate ? { joiningDate } : {}),
+      ...(customNotes ? { statusNotes: customNotes } : {}),
+    };
 
     const updated = await this.prisma.application.update({
       where: { id: applicationId },
       data: {
         status,
         ...(rejectionReason !== undefined && { rejectionReason }),
+        ...((joiningDate || customNotes) && { metadata: updatedMetadata }),
       },
       include: {
         candidate: true,
@@ -743,6 +753,8 @@ export class ApplicationsService {
       companyName,
       stageName: status,
       rejectionReason,
+      customNotes,
+      joiningDate,
     };
 
     if (this.notificationWorker) {

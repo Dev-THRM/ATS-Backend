@@ -160,14 +160,16 @@ export class ApplicationsController {
     if (!targetStageId) {
       throw new BadRequestException('stageId or toStageId is required');
     }
+    const finalReason = dto.rejectionReason || dto.reason;
+    const finalNotes = dto.customNotes || dto.notes || dto.note;
     return this.applicationsService.moveToStage(
       orgId,
       id,
       targetStageId,
-      dto.rejectionReason,
+      finalReason,
       userId,
       dto.sendEmail !== false,
-      dto.customNotes,
+      finalNotes,
       dto.joiningDate,
     );
   }
@@ -185,11 +187,15 @@ export class ApplicationsController {
     @Param('id') id: string,
     @Body() dto: UpdateApplicationStatusDto,
   ) {
+    const finalReason = dto.rejectionReason || dto.reason;
+    const finalNotes = dto.customNotes || dto.notes || dto.note;
     return this.applicationsService.updateStatus(
       orgId,
       id,
       dto.status,
-      dto.rejectionReason,
+      finalReason,
+      finalNotes,
+      dto.joiningDate,
     );
   }
 

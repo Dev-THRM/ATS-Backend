@@ -45,6 +45,14 @@ export class CreateApplicationDto {
   @IsOptional()
   utmCampaign?: string;
 
+  @IsString()
+  @IsOptional()
+  notes?: string;
+
+  @IsString()
+  @IsOptional()
+  customNotes?: string;
+
   @IsOptional()
   metadata?: Record<string, any>;
 }
