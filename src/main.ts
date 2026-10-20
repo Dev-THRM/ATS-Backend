@@ -121,7 +121,9 @@ async function bootstrap() {
   });
 
   // Global prefix for versioned APIs
-  app.setGlobalPrefix('api/v1');
+  app.setGlobalPrefix('api/v1', {
+    exclude: ['/', 'app/download', 'download'],
+  });
 
   // Global exception filter for Sentry tracking
   app.useGlobalFilters(new SentryExceptionFilter());

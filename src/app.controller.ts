@@ -15,12 +15,25 @@ export class AppController {
 
   @Get('app/download')
   downloadApk(@Res() res: Response) {
-    const localApk = path.resolve(process.cwd(), 'storage/downloads/thrm-universe-ats.apk');
-    if (fs.existsSync(localApk)) {
-      res.setHeader('Content-Type', 'application/vnd.android.package-archive');
-      res.setHeader('Content-Disposition', 'attachment; filename="thrm-universe-ats.apk"');
-      return res.sendFile(localApk);
+    const candidates = [
+      path.resolve(process.cwd(), 'storage/downloads/thrm-universe-ats.apk'),
+      path.resolve(process.cwd(), '../ATS-Web/public/downloads/thrm-universe-ats.apk'),
+      path.resolve(process.cwd(), 'public/downloads/thrm-universe-ats.apk'),
+    ];
+
+    for (const candidate of candidates) {
+      if (fs.existsSync(candidate)) {
+        res.setHeader('Content-Type', 'application/vnd.android.package-archive');
+        res.setHeader('Content-Disposition', 'attachment; filename="thrm-universe-ats.apk"');
+        return res.sendFile(candidate);
+      }
     }
-    return res.redirect('https://api.expo.dev/v2/artifacts/eas/l1iHUTLN4oK_uRt0srgyQ8hfJ1dXyYxhSH5YdmCNdiM');
+
+    return res.redirect('https://thrmuniverse.in/downloads/thrm-universe-ats.apk');
+  }
+
+  @Get('download')
+  downloadApkAlias(@Res() res: Response) {
+    return this.downloadApk(res);
   }
 }
