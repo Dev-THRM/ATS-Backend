@@ -16,20 +16,22 @@ export class AppController {
   @Get('app/download')
   downloadApk(@Res() res: Response) {
     const candidates = [
+      path.resolve(process.cwd(), 'storage/downloads/thrm-universe.apk'),
+      path.resolve(process.cwd(), '../ATS-Web/public/downloads/thrm-universe.apk'),
+      path.resolve(process.cwd(), 'public/downloads/thrm-universe.apk'),
       path.resolve(process.cwd(), 'storage/downloads/thrm-universe-ats.apk'),
       path.resolve(process.cwd(), '../ATS-Web/public/downloads/thrm-universe-ats.apk'),
-      path.resolve(process.cwd(), 'public/downloads/thrm-universe-ats.apk'),
     ];
 
     for (const candidate of candidates) {
       if (fs.existsSync(candidate)) {
         res.setHeader('Content-Type', 'application/vnd.android.package-archive');
-        res.setHeader('Content-Disposition', 'attachment; filename="thrm-universe-ats.apk"');
+        res.setHeader('Content-Disposition', 'attachment; filename="thrm-universe.apk"');
         return res.sendFile(candidate);
       }
     }
 
-    return res.redirect('https://thrmuniverse.in/downloads/thrm-universe-ats.apk');
+    return res.redirect('https://thrmuniverse.in/downloads/thrm-universe.apk');
   }
 
   @Get('download')
