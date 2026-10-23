@@ -8,6 +8,9 @@ export interface EmailTemplateParams {
   rejectionReason?: string | null;
   customNotes?: string | null;
   joiningDate?: string | null;
+  employmentType?: string | null;
+  offerAcceptanceDate?: string | null;
+  compensation?: any | null;
 }
 
 export interface RenderedEmail {
@@ -167,11 +170,16 @@ ${companyName}`;
   }
 
   /**
-   * Template: Candidate clears HR round -> Offer Template (Congratulations!)
+   * Template: Candidate clears HR round / Hired -> Official Appointment Letter & Offer Email
    */
   renderOfferEmail(params: EmailTemplateParams): RenderedEmail {
-    const { candidateName, jobTitle, companyName, customNotes, joiningDate } = params;
-    const subject = `🎉 Congratulations! Job Offer for ${jobTitle} at ${companyName}`;
+    const {
+      candidateName,
+      jobTitle,
+      companyName,
+      joiningDate,
+      offerAcceptanceDate,
+    } = params;
 
     let formattedJoiningDate = '';
     if (joiningDate) {
@@ -192,24 +200,68 @@ ${companyName}`;
       }
     }
 
+    let formattedAcceptanceDate = '';
+    if (offerAcceptanceDate) {
+      try {
+        const d = new Date(offerAcceptanceDate);
+        if (!isNaN(d.getTime())) {
+          const day = d.getDate();
+          const suffix =
+            day === 1 || day === 21 || day === 31
+              ? 'st'
+              : day === 2 || day === 22
+                ? 'nd'
+                : day === 3 || day === 23
+                  ? 'rd'
+                  : 'th';
+          const monthYear = d.toLocaleDateString('en-US', {
+            month: 'long',
+            year: 'numeric',
+          });
+          formattedAcceptanceDate = `${day}${suffix} ${monthYear}`;
+        }
+      } catch {
+        formattedAcceptanceDate = offerAcceptanceDate;
+      }
+    } else if (joiningDate) {
+      try {
+        const d = new Date(joiningDate);
+        if (!isNaN(d.getTime())) {
+          const returnDate = new Date(d);
+          returnDate.setDate(returnDate.getDate() + 2);
+          const day = returnDate.getDate();
+          const suffix =
+            day === 1 || day === 21 || day === 31
+              ? 'st'
+              : day === 2 || day === 22
+                ? 'nd'
+                : day === 3 || day === 23
+                  ? 'rd'
+                  : 'th';
+          const monthYear = returnDate.toLocaleDateString('en-US', {
+            month: 'long',
+            year: 'numeric',
+          });
+          formattedAcceptanceDate = `${day}${suffix} ${monthYear}`;
+        }
+      } catch {
+        // fallback
+      }
+    }
+
+    const subject = `Offer and Appointment letter: ${jobTitle} | ${companyName || 'THRM Digital Marketing Agency'}`;
+
     const text = `Dear ${candidateName},
 
-CONGRATULATIONS! 🎉
+Congratulations! We are pleased to extend you an offer for the position of ${jobTitle} at ${companyName || 'THRM Digital Marketing Agency'}.
 
-We are thrilled to inform you that you have successfully cleared the HR and interview rounds for the ${jobTitle} position at ${companyName}!
+Please find your official Offer and Appointment letter attached to this email as a PDF. Kindly review, sign, and return a copy within 2 days of joining${formattedAcceptanceDate ? ` (on or before ${formattedAcceptanceDate})` : ''} to confirm your acceptance.
 
-The leadership and interview team were very impressed with your credentials, skills, and conversations throughout the hiring process.
-
-We are delighted to extend this formal offer of employment to you. Our Human Resources team is currently finalizing your official offer letter and compensation package.${formattedJoiningDate ? `\n\n📅 Expected Date of Joining: ${formattedJoiningDate}` : ''}
-
-We will share the paperwork and next onboarding steps with you shortly.
-
-${customNotes ? `Note from HR: ${customNotes}\n\n` : ''}
-Once again, congratulations! We are excited about the prospect of having you on our team.
+We look forward to welcoming you to the team!
 
 Warm regards,
-Human Resources Team
-${companyName}`;
+HR & Recruitment Team
+${companyName || 'THRM Digital Marketing Agency'}`;
 
     const html = `
 <!DOCTYPE html>
@@ -220,95 +272,37 @@ ${companyName}`;
   <title>${subject}</title>
 </head>
 <body style="margin: 0; padding: 0; background-color: #f8fafc; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; color: #1e293b;">
-  <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color: #f8fafc; padding: 32px 16px;">
+  <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color: #f8fafc; padding: 40px 20px;">
     <tr>
       <td align="center">
-        <table width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width: 600px; background-color: #ffffff; border-radius: 16px; border: 1px solid #e2e8f0; overflow: hidden; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05);">
-          <!-- Celebratory Header -->
+        <table width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width: 560px; background-color: #ffffff; border-radius: 12px; border: 1px solid #e2e8f0; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.05);">
+          <!-- Top Accent Line -->
           <tr>
-            <td style="background: linear-gradient(135deg, #059669, #10b981); padding: 36px 28px; text-align: center;">
-              <div style="display: inline-block; font-size: 36px; margin-bottom: 8px;">🎉</div>
-              <h1 style="margin: 0; color: #ffffff; font-size: 24px; font-weight: 800; letter-spacing: -0.02em;">
-                Congratulations, ${candidateName}!
-              </h1>
-              <p style="margin: 8px 0 0 0; color: #d1fae5; font-size: 15px; font-weight: 600;">
-                You Cleared the HR Round &bull; Job Offer Extended
-              </p>
-            </td>
+            <td style="height: 4px; background: #8C3A27;"></td>
           </tr>
-
-          <!-- Content Body -->
+          <!-- Body Content (Simple 2-3 lines) -->
           <tr>
-            <td style="padding: 32px 28px;">
-              <p style="margin: 0 0 16px 0; font-size: 16px; line-height: 1.6; color: #0f172a;">
-                Dear <strong>${candidateName}</strong>,
+            <td style="padding: 36px 32px;">
+              <h2 style="margin: 0 0 16px 0; color: #8C3A27; font-size: 20px; font-weight: 700;">
+                Congratulations, ${candidateName}!
+              </h2>
+              <p style="margin: 0 0 16px 0; font-size: 15px; line-height: 1.6; color: #334155;">
+                We are pleased to extend you an offer for the position of <strong>${jobTitle}</strong> at <strong>${companyName || 'THRM Digital Marketing Agency'}</strong>.
               </p>
               <p style="margin: 0 0 16px 0; font-size: 15px; line-height: 1.6; color: #334155;">
-                We are thrilled to let you know that you have <strong>successfully cleared the HR evaluation and interview rounds</strong> for the position of <strong>${jobTitle}</strong> at <strong>${companyName}</strong>!
+                Please find your official <strong>Offer and Appointment letter attached to this email as a PDF</strong>. Kindly review the details, sign, and return a copy within 2 days of joining${formattedAcceptanceDate ? ` (on or before <strong>${formattedAcceptanceDate}</strong>)` : ''} to confirm your acceptance.
               </p>
-              <p style="margin: 0 0 20px 0; font-size: 15px; line-height: 1.6; color: #334155;">
-                Our leadership and interviewing team were thoroughly impressed with your technical capabilities, background, and cultural alignment with our agency mission.
+              <p style="margin: 0 0 28px 0; font-size: 15px; line-height: 1.6; color: #334155;">
+                We are excited to welcome you to our team and look forward to having you onboard!
               </p>
-
-              <!-- Offer Details Box -->
-              <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color: #f0fdf4; border: 2px solid #86efac; border-radius: 14px; margin: 24px 0;">
-                <tr>
-                  <td style="padding: 20px;">
-                    <div style="font-size: 12px; font-weight: 800; color: #15803d; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 6px;">Offer of Employment</div>
-                    <div style="font-size: 18px; font-weight: 900; color: #065f46; margin-bottom: 4px;">${jobTitle}</div>
-                    <div style="font-size: 13px; font-weight: 600; color: #16a34a;">Organization: ${companyName}</div>
-
-                    ${
-                      formattedJoiningDate
-                        ? `
-                    <div style="margin-top: 14px; padding: 14px 16px; background-color: #ffffff; border: 1.5px solid #86efac; border-radius: 10px; box-shadow: 0 1px 2px rgba(0,0,0,0.04);">
-                      <div style="font-size: 11px; font-weight: 800; color: #15803d; text-transform: uppercase; letter-spacing: 0.05em;">Expected Date of Joining</div>
-                      <div style="font-size: 17px; font-weight: 900; color: #065f46; margin-top: 3px;">📅 ${formattedJoiningDate}</div>
-                      <div style="font-size: 12px; color: #16a34a; margin-top: 3px;">Please mark this date on your calendar. Your orientation and onboarding will commence on this day.</div>
-                    </div>`
-                        : ''
-                    }
-
-                    <div style="margin-top: 12px; padding-top: 12px; border-top: 1px dashed #bbf7d0; font-size: 13px; color: #15803d; line-height: 1.5;">
-                      ✅ <strong>Next Step:</strong> Our HR operations team is preparing your official offer letter and compensation schedule. You will receive the documents shortly for review and electronic signature.
-                    </div>
-                  </td>
-                </tr>
-              </table>
-
-              ${
-                customNotes
-                  ? `
-              <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; margin: 20px 0;">
-                <tr>
-                  <td style="padding: 16px;">
-                    <div style="font-size: 12px; font-weight: 700; color: #475569; text-transform: uppercase;">HR Notes</div>
-                    <div style="font-size: 14px; color: #334155; margin-top: 4px; line-height: 1.5;">${customNotes}</div>
-                  </td>
-                </tr>
-              </table>
-              `
-                  : ''
-              }
-
-              <p style="margin: 20px 0 16px 0; font-size: 15px; line-height: 1.6; color: #334155;">
-                We are immensely excited about the potential of welcoming you aboard and working together to achieve great milestones!
-              </p>
-
-              <div style="margin-top: 32px; padding-top: 20px; border-top: 1px solid #f1f5f9;">
-                <p style="margin: 0; font-size: 14px; font-weight: 700; color: #0f172a;">Human Resources Team</p>
-                <p style="margin: 2px 0 0 0; font-size: 13px; color: #64748b;">${companyName}</p>
+              <!-- Signoff -->
+              <div style="border-top: 1px solid #e2e8f0; padding-top: 20px;">
+                <p style="margin: 0; font-size: 14px; font-weight: 600; color: #1e293b;">Warm regards,</p>
+                <p style="margin: 4px 0 0 0; font-size: 13px; color: #64748b; line-height: 1.5;">
+                  HR &amp; Recruitment Team<br>
+                  <strong>${companyName || 'THRM Digital Marketing Agency'}</strong>
+                </p>
               </div>
-            </td>
-          </tr>
-
-          <!-- Footer -->
-          <tr>
-            <td style="background-color: #f8fafc; padding: 20px 28px; border-top: 1px solid #e2e8f0; text-align: center;">
-              <p style="margin: 0; font-size: 12px; color: #94a3b8; line-height: 1.5;">
-                &copy; ${new Date().getFullYear()} ${companyName}. All rights reserved.<br>
-                Official communication from Human Resources.
-              </p>
             </td>
           </tr>
         </table>
@@ -316,7 +310,7 @@ ${companyName}`;
     </tr>
   </table>
 </body>
-</html>`;
+</html>`.trim();
 
     return { subject, html, text };
   }

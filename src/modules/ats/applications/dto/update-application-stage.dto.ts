@@ -41,6 +41,17 @@ export class UpdateApplicationStageDto {
 
   @IsString()
   @IsOptional()
+  employmentType?: string; // 'INTERNSHIP' | 'FULL_TIME'
+
+  @IsString()
+  @IsOptional()
+  offerAcceptanceDate?: string;
+
+  @IsOptional()
+  compensation?: any;
+
+  @IsString()
+  @IsOptional()
   status?: string;
 }
 

@@ -5,8 +5,9 @@ import { NOTIFICATION_QUEUE } from '../../shared/queue/queue.module.js';
 import { PrismaService } from '../../shared/prisma/prisma.service.js';
 import { WhatsAppTemplatesService } from './whatsapp-templates.service.js';
 import { WhatsAppService } from './whatsapp.service.js';
-import { EmailService } from './email.service.js';
+import { EmailService, EmailAttachment } from './email.service.js';
 import { EmailTemplatesService } from './email-templates.service.js';
+import { AppointmentLetterPdfService } from './appointment-letter-pdf.service.js';
 
 export interface CandidateStatusUpdateJobData {
   applicationId: string;
@@ -22,6 +23,9 @@ export interface CandidateStatusUpdateJobData {
   rejectionReason?: string | null;
   customNotes?: string | null;
   joiningDate?: string | null;
+  employmentType?: string | null;
+  offerAcceptanceDate?: string | null;
+  compensation?: any | null;
   channel?: 'WHATSAPP' | 'EMAIL' | 'ALL';
 }
 
@@ -47,6 +51,7 @@ export class CandidateNotificationWorker extends WorkerHost {
   private readonly logger = new Logger(CandidateNotificationWorker.name);
   private readonly emailService: EmailService;
   private readonly emailTemplatesService: EmailTemplatesService;
+  private readonly appointmentLetterPdfService: AppointmentLetterPdfService;
 
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
@@ -60,6 +65,9 @@ export class CandidateNotificationWorker extends WorkerHost {
     @Inject(EmailTemplatesService)
     emailTemplatesService?: EmailTemplatesService,
     @Optional()
+    @Inject(AppointmentLetterPdfService)
+    appointmentLetterPdfService?: AppointmentLetterPdfService,
+    @Optional()
     @InjectQueue(NOTIFICATION_QUEUE)
     private readonly notificationQueue?: Queue,
   ) {
@@ -67,6 +75,8 @@ export class CandidateNotificationWorker extends WorkerHost {
     this.emailService = emailService || new EmailService();
     this.emailTemplatesService =
       emailTemplatesService || new EmailTemplatesService();
+    this.appointmentLetterPdfService =
+      appointmentLetterPdfService || new AppointmentLetterPdfService();
   }
 
   async process(job: Job<any>): Promise<any> {
@@ -152,6 +162,9 @@ export class CandidateNotificationWorker extends WorkerHost {
       rejectionReason,
       customNotes,
       joiningDate,
+      employmentType,
+      offerAcceptanceDate,
+      compensation,
     } = data;
 
     const resolvedCompany = companyName || 'Hiring Organization';
@@ -196,6 +209,8 @@ export class CandidateNotificationWorker extends WorkerHost {
           rejectionReason: rejectionReason || undefined,
           customNotes: customNotes || undefined,
           joiningDate: joiningDate || undefined,
+          employmentType: employmentType || undefined,
+          offerAcceptanceDate: offerAcceptanceDate || undefined,
         });
 
         whatsAppResult = await this.whatsAppService.send({
@@ -236,13 +251,45 @@ export class CandidateNotificationWorker extends WorkerHost {
           rejectionReason,
           customNotes,
           joiningDate,
+          employmentType,
+          offerAcceptanceDate,
+          compensation,
         });
+
+        let attachments: EmailAttachment[] | undefined;
+        const normalizedStage = (stageName || '').toUpperCase();
+        if (normalizedStage.includes('HIRE') || normalizedStage.includes('OFFER') || joiningDate) {
+          try {
+            const pdfBuffer = await this.appointmentLetterPdfService.generatePdfBuffer({
+              candidateName,
+              jobTitle,
+              companyName: resolvedCompany,
+              joiningDate: joiningDate || undefined,
+              employmentType: employmentType || undefined,
+              offerAcceptanceDate: offerAcceptanceDate || undefined,
+              compensation,
+            });
+
+            const safeCandidateName = (candidateName || 'Candidate').trim().replace(/[^a-zA-Z0-9_-]/g, '_');
+            attachments = [
+              {
+                filename: `Offer_and_Appointment_Letter_${safeCandidateName}.pdf`,
+                content: pdfBuffer,
+                contentType: 'application/pdf',
+              },
+            ];
+            this.logger.log(`Attached Offer_and_Appointment_Letter_${safeCandidateName}.pdf (${pdfBuffer.length} bytes) to email for ${candidateEmail}`);
+          } catch (pdfErr: any) {
+            this.logger.error(`Failed to generate appointment letter PDF attachment: ${pdfErr.message}`, pdfErr.stack);
+          }
+        }
 
         emailResult = await this.emailService.sendMail({
           to: candidateEmail,
           subject: renderedEmail.subject,
           html: renderedEmail.html,
           text: renderedEmail.text,
+          attachments,
         });
 
         newLogs.push({

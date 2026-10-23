@@ -1,12 +1,19 @@
 import { Injectable, Logger } from '@nestjs/common';
 import * as nodemailer from 'nodemailer';
 
+export interface EmailAttachment {
+  filename: string;
+  content: Buffer | string;
+  contentType?: string;
+}
+
 export interface SendEmailOptions {
   to: string;
   subject: string;
   html: string;
   text?: string;
   from?: string;
+  attachments?: EmailAttachment[];
 }
 
 export interface SendEmailResult {
@@ -100,6 +107,7 @@ export class EmailService {
         subject: options.subject,
         text: options.text || options.subject,
         html: options.html,
+        attachments: options.attachments,
       });
 
       this.logger.log(

@@ -8,6 +8,8 @@ export interface StageUpdateTemplateParams {
   rejectionReason?: string;
   customNotes?: string;
   joiningDate?: string;
+  employmentType?: string;
+  offerAcceptanceDate?: string;
   language?: string;
 }
 
@@ -63,10 +65,17 @@ export class WhatsAppTemplatesService {
       if (rejectionReason) {
         parameters['5'] = rejectionReason;
       }
-    } else if (normalizedStage.includes('offer')) {
+    } else if (
+      normalizedStage.includes('offer') ||
+      normalizedStage.includes('hired') ||
+      normalizedStage.includes('hire')
+    ) {
       templateName = 'ats_stage_offer';
+      const isIntern = params.employmentType?.toUpperCase().includes('INTERN');
+      const typeLabel = isIntern ? 'Internship (₹7,000/mo)' : 'Full-Time Employment (₹15,000/mo)';
       const joiningSuffix = params.joiningDate ? ` Your anticipated date of joining is ${params.joiningDate}.` : '';
-      bodyText = `Hi ${candidateName}, congratulations! 🎉 We are thrilled to extend an offer for the ${jobTitle} position at ${companyName}.${joiningSuffix} Our team will share the formal offer details and next steps shortly.`;
+      const acceptanceSuffix = params.offerAcceptanceDate ? ` Acceptance deadline: ${params.offerAcceptanceDate}.` : '';
+      bodyText = `Hi ${candidateName}, congratulations! 🎉 We are thrilled to extend an official appointment letter for the ${jobTitle} position (${typeLabel}) at ${companyName}.${joiningSuffix}${acceptanceSuffix} Please review your appointment letter and compensation breakdown sent to your email.`;
     } else if (
       normalizedStage.includes('interview') ||
       normalizedStage.includes('tech round') ||

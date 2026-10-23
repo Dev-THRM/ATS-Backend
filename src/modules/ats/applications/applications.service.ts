@@ -364,6 +364,9 @@ export class ApplicationsService {
     sendEmail: boolean = true,
     customNotes?: string,
     joiningDate?: string,
+    employmentType?: string,
+    offerAcceptanceDate?: string,
+    compensation?: any,
   ) {
     const application = await this.findOne(organizationId, applicationId);
 
@@ -383,6 +386,8 @@ export class ApplicationsService {
     const isTargetRejected = stageNameLower.includes('reject');
     const isCurrentRejected =
       currentStage?.name?.toLowerCase().includes('reject');
+    const isTargetHired = stageNameLower.includes('hired') || stageNameLower.includes('hire');
+    const isTargetOfferOrHired = isTargetHired || stageNameLower.includes('offer');
 
     // Enforce forward-only pipeline progression rule (unless moving to Rejected, or restoring from Rejected)
     if (
@@ -398,10 +403,7 @@ export class ApplicationsService {
 
     if (isTargetRejected) {
       status = ApplicationStatus.REJECTED;
-    } else if (
-      stageNameLower.includes('hired') ||
-      stageNameLower.includes('hire')
-    ) {
+    } else if (isTargetHired) {
       status = ApplicationStatus.HIRED;
     } else if (
       status === ApplicationStatus.REJECTED ||
@@ -410,10 +412,19 @@ export class ApplicationsService {
       status = ApplicationStatus.ACTIVE;
     }
 
+    const hiringDetails = isTargetOfferOrHired
+      ? this.resolveHiringDetails(joiningDate, employmentType, offerAcceptanceDate, compensation)
+      : null;
+
     const existingMeta = (application.metadata as Record<string, any>) || {};
     const updatedMetadata = {
       ...existingMeta,
       ...(joiningDate ? { joiningDate } : {}),
+      ...(hiringDetails ? {
+        employmentType: hiringDetails.employmentType,
+        offerAcceptanceDate: hiringDetails.offerAcceptanceDate,
+        compensation: hiringDetails.compensation,
+      } : {}),
     };
 
     const updated = await this.prisma.application.update({
@@ -463,7 +474,7 @@ export class ApplicationsService {
 
     // Dispatch candidate status transition notification
     const companyName =
-      (updated.job as any)?.organization?.name || 'Hiring Organization';
+      (updated.job as any)?.organization?.name || 'THRM Digital Marketing Agency';
     const notificationPayload = {
       applicationId: updated.id,
       candidateId: updated.candidateId,
@@ -478,6 +489,9 @@ export class ApplicationsService {
       rejectionReason,
       customNotes,
       joiningDate,
+      employmentType: hiringDetails?.employmentType,
+      offerAcceptanceDate: hiringDetails?.offerAcceptanceDate,
+      compensation: hiringDetails?.compensation,
     };
 
     if (sendEmail) {
@@ -703,14 +717,27 @@ export class ApplicationsService {
     rejectionReason?: string,
     customNotes?: string,
     joiningDate?: string,
+    employmentType?: string,
+    offerAcceptanceDate?: string,
+    compensation?: any,
   ) {
     const app = await this.findOne(organizationId, applicationId);
+
+    const isHiredOrOffer = status === ApplicationStatus.HIRED;
+    const hiringDetails = isHiredOrOffer
+      ? this.resolveHiringDetails(joiningDate, employmentType, offerAcceptanceDate, compensation)
+      : null;
 
     const existingMeta = (app.metadata as Record<string, any>) || {};
     const updatedMetadata = {
       ...existingMeta,
       ...(joiningDate ? { joiningDate } : {}),
       ...(customNotes ? { statusNotes: customNotes } : {}),
+      ...(hiringDetails ? {
+        employmentType: hiringDetails.employmentType,
+        offerAcceptanceDate: hiringDetails.offerAcceptanceDate,
+        compensation: hiringDetails.compensation,
+      } : {}),
     };
 
     const updated = await this.prisma.application.update({
@@ -718,7 +745,7 @@ export class ApplicationsService {
       data: {
         status,
         ...(rejectionReason !== undefined && { rejectionReason }),
-        ...((joiningDate || customNotes) && { metadata: updatedMetadata }),
+        ...((joiningDate || customNotes || hiringDetails) && { metadata: updatedMetadata }),
       },
       include: {
         candidate: true,
@@ -741,7 +768,7 @@ export class ApplicationsService {
 
     // Dispatch candidate status transition notification
     const companyName =
-      (updated.job as any)?.organization?.name || 'Hiring Organization';
+      (updated.job as any)?.organization?.name || 'THRM Digital Marketing Agency';
     const notificationPayload = {
       applicationId: updated.id,
       candidateId: updated.candidateId,
@@ -755,6 +782,9 @@ export class ApplicationsService {
       rejectionReason,
       customNotes,
       joiningDate,
+      employmentType: hiringDetails?.employmentType,
+      offerAcceptanceDate: hiringDetails?.offerAcceptanceDate,
+      compensation: hiringDetails?.compensation,
     };
 
     if (this.notificationWorker) {
@@ -783,6 +813,69 @@ export class ApplicationsService {
     return {
       message: 'Application deleted successfully',
       id: applicationId,
+    };
+  }
+
+  /**
+   * Helper to compute hiring details (Internship vs Full-Time compensation & 15th offer acceptance deadline).
+   */
+  private resolveHiringDetails(
+    joiningDate?: string,
+    employmentType?: string,
+    offerAcceptanceDate?: string,
+    compensation?: any,
+  ) {
+    const isIntern =
+      employmentType?.toUpperCase() === 'INTERNSHIP' ||
+      employmentType?.toUpperCase() === 'INTERN';
+    const resolvedType = isIntern ? 'INTERNSHIP' : 'FULL_TIME';
+
+    // Calculate acceptance deadline: 2 days after joining date
+    let resolvedAcceptanceDate = offerAcceptanceDate;
+    if (!resolvedAcceptanceDate && joiningDate) {
+      try {
+        const d = new Date(joiningDate);
+        if (!isNaN(d.getTime())) {
+          d.setDate(d.getDate() + 2);
+          resolvedAcceptanceDate = d.toISOString().split('T')[0];
+        }
+      } catch {
+        // keep fallback
+      }
+    }
+
+    // Full Time (15k): basic 7500, hra 3000, specialAllowance 4500, gross 15000, pt 200, insurance 150, totalDeductions 350, net 14650
+    // Internship (7k): basic 3500, hra 1400, specialAllowance 2100, gross 7000, pt 100, insurance 150, totalDeductions 250, net 6750
+    const resolvedComp = compensation || (isIntern ? {
+      type: 'INTERNSHIP',
+      title: 'Monthly Stipend Structure',
+      grossMonthly: 7000,
+      basic: 3500,
+      hra: 1400,
+      specialAllowance: 2100,
+      professionalTax: 100,
+      insurance: 150,
+      totalDeductions: 250,
+      netInHand: 6750,
+      currency: 'INR',
+    } : {
+      type: 'FULL_TIME',
+      title: 'Monthly Salary Structure',
+      grossMonthly: 15000,
+      basic: 7500,
+      hra: 3000,
+      specialAllowance: 4500,
+      professionalTax: 200,
+      insurance: 150,
+      totalDeductions: 350,
+      netInHand: 14650,
+      currency: 'INR',
+    });
+
+    return {
+      employmentType: resolvedType,
+      offerAcceptanceDate: resolvedAcceptanceDate,
+      compensation: resolvedComp,
     };
   }
 }

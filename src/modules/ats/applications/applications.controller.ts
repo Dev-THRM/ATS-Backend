@@ -171,6 +171,9 @@ export class ApplicationsController {
       dto.sendEmail !== false,
       finalNotes,
       dto.joiningDate,
+      dto.employmentType,
+      dto.offerAcceptanceDate,
+      dto.compensation,
     );
   }
 
@@ -196,6 +199,9 @@ export class ApplicationsController {
       finalReason,
       finalNotes,
       dto.joiningDate,
+      dto.employmentType,
+      dto.offerAcceptanceDate,
+      dto.compensation,
     );
   }
 

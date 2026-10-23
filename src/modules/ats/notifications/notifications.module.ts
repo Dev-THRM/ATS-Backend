@@ -5,6 +5,7 @@ import { WhatsAppService } from './whatsapp.service.js';
 import { EmailService } from './email.service.js';
 import { EmailTemplatesService } from './email-templates.service.js';
 import { CandidateNotificationWorker } from './candidate-notification.worker.js';
+import { AppointmentLetterPdfService } from './appointment-letter-pdf.service.js';
 
 @Module({
   imports: [SharedModule],
@@ -14,6 +15,7 @@ import { CandidateNotificationWorker } from './candidate-notification.worker.js'
     EmailService,
     EmailTemplatesService,
     CandidateNotificationWorker,
+    AppointmentLetterPdfService,
   ],
   exports: [
     WhatsAppTemplatesService,
@@ -21,6 +23,7 @@ import { CandidateNotificationWorker } from './candidate-notification.worker.js'
     EmailService,
     EmailTemplatesService,
     CandidateNotificationWorker,
+    AppointmentLetterPdfService,
   ],
 })
 export class NotificationsModule {}

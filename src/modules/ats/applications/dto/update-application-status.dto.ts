@@ -29,5 +29,16 @@ export class UpdateApplicationStatusDto {
   @IsString()
   @IsOptional()
   note?: string;
+
+  @IsString()
+  @IsOptional()
+  employmentType?: string;
+
+  @IsString()
+  @IsOptional()
+  offerAcceptanceDate?: string;
+
+  @IsOptional()
+  compensation?: any;
 }
 
