@@ -687,10 +687,19 @@ export class AppointmentLetterPdfService {
   }
 
   private resolvePythonScriptPath(): string | null {
+    let dirname = '';
+    try {
+      dirname = path.dirname(fileURLToPath(import.meta.url));
+    } catch {
+      // ignore
+    }
+
     const candidates = [
       path.join(process.cwd(), 'scripts/generate_appointment_letter.py'),
       path.resolve('e:/ATS/ATS-Backend/scripts/generate_appointment_letter.py'),
-      path.join(__dirname, '../../../../scripts/generate_appointment_letter.py'),
+      path.join(process.cwd(), 'dist/scripts/generate_appointment_letter.py'),
+      path.resolve('e:/ATS/ATS-Backend/dist/scripts/generate_appointment_letter.py'),
+      ...(dirname ? [path.resolve(dirname, '../../../../scripts/generate_appointment_letter.py')] : []),
     ];
 
     for (const cand of candidates) {
@@ -703,10 +712,22 @@ export class AppointmentLetterPdfService {
   }
 
   private resolveTemplatePath(): string {
+    let dirname = '';
+    try {
+      dirname = path.dirname(fileURLToPath(import.meta.url));
+    } catch {
+      // ignore
+    }
+
     const candidates = [
       path.join(process.cwd(), 'src/assets/templates/appointment-letter-template.pdf'),
       path.join(process.cwd(), 'dist/assets/templates/appointment-letter-template.pdf'),
       path.resolve('e:/ATS/ATS-Backend/src/assets/templates/appointment-letter-template.pdf'),
+      path.resolve('e:/ATS/ATS-Backend/dist/assets/templates/appointment-letter-template.pdf'),
+      ...(dirname ? [
+        path.resolve(dirname, '../../../../src/assets/templates/appointment-letter-template.pdf'),
+        path.resolve(dirname, '../../../../dist/assets/templates/appointment-letter-template.pdf'),
+      ] : []),
       'C:/Users/SAHIL/.gemini/antigravity-ide/brain/749849f6-3b41-41e9-b5f5-9783306329d8/.user_uploaded/media_1792656523098.pdf',
     ];
 
